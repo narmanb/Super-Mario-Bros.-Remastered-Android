@@ -32,6 +32,11 @@ func go_to_menu() -> void:
 	ResourceGenerator.updating = true
 	if Global.rom_path == "":
 		Global.transition_to_scene("res://Scenes/Levels/RomVerifier.tscn")
+	elif OS.has_feature("android"):
+		# Diagnostic build: regenerate once even if Run 20 already produced a
+		# valid BaseAssets pack, so the post-generation isolation is exercised
+		# without requiring the tester to clear app data again.
+		Global.transition_to_scene("res://Scenes/Levels/RomResourceGenerator.tscn")
 	elif not Global.rom_assets_exist:
 		Global.transition_to_scene("res://Scenes/Levels/RomResourceGenerator.tscn")
 	else:
