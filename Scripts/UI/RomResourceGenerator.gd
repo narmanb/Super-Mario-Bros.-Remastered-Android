@@ -23,7 +23,17 @@ func _exit_tree() -> void:
 func done() -> void:
 	if not Settings.file.visuals.resource_packs.has(Global.ROM_PACK_NAME):
 		Settings.file.visuals.resource_packs.insert(0, Global.ROM_PACK_NAME)
-		
+
+	if OS.has_feature("android"):
+		# Diagnostic isolation: generation is complete, but intentionally do not
+		# enter TitleScreen yet. If Android remains alive here, the crash is in
+		# the title/resource-pack initialization path rather than the generator.
+		Global.rom_assets_exist = true
+		progress_bar.value = progress_bar.max_value
+		$MarginContainer/ProgressBar/Label.text = "ASSETS COMPLETE - DIAGNOSTIC"
+		print("[ANDROID_DIAG] ROM assets complete; TitleScreen transition suppressed")
+		return
+
 	await get_tree().create_timer(0.5).timeout
 	Global.transition_to_scene("res://Scenes/Levels/TitleScreen.tscn")
 
