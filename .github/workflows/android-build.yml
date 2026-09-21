@@ -68,18 +68,15 @@ jobs:
           mv templates/* "$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_VERSION}/"
           godot --version
 
-      - name: Create Android debug signing key and Godot editor settings
+      - name: Install stable Android debug signing key and Godot editor settings
+        shell: bash
         run: |
           mkdir -p "$HOME/.android" "$HOME/.config/godot"
-          keytool -genkeypair \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          cat <<'KEYSTORE_B64' | base64 --decode > "$HOME/.android/debug.keystore"
+          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
+          KEYSTORE_B64
+          chmod 600 "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
 
           cat > "$HOME/.config/godot/editor_settings-4.6.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
