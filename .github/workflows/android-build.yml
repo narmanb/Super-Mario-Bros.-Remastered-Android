@@ -1,0 +1,103 @@
+name: "Android 1.1 build"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-port
+    paths:
+      - "Scripts/**"
+      - "Scenes/**"
+      - "Resources/**"
+      - "Assets/**"
+      - "addons/**"
+      - "android/**"
+      - "project.godot"
+      - "export_presets.cfg"
+      - ".github/workflows/android-build.yml"
+
+env:
+  GODOT_RELEASE: 4.6-stable
+  GODOT_TEMPLATE_VERSION: 4.6.stable
+  APK_PATH: build/SMB1R-1.1-android-debug.apk
+
+jobs:
+  build-android:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+
+      - name: Install Godot 4.6 and export templates
+        run: |
+          wget -q "https://github.com/godotengine/godot-builds/releases/download/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O godot.zip
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+
+          wget -q "https://github.com/godotengine/godot-builds/releases/download/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz" -O templates.tpz
+          unzip -q templates.tpz
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_VERSION}"
+          mv templates/* "$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_VERSION}/"
+          godot --version
+
+      - name: Create Android debug signing key and Godot editor settings
+        run: |
+          mkdir -p "$HOME/.android" "$HOME/.config/godot"
+          keytool -genkeypair \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          cat > "$HOME/.config/godot/editor_settings-4.6.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+      - name: Prepare Android export
+        run: python3 android/prepare_android_export.py
+
+      - name: Export debug APK
+        run: |
+          mkdir -p build
+          godot --headless --verbose --path . \
+            --install-android-build-template \
+            --export-debug "Android" "$APK_PATH"
+          test -s "$APK_PATH"
+          ls -lh "$APK_PATH"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMB1R-1.1-android-debug
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
