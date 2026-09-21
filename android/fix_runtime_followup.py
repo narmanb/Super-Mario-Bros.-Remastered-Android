@@ -123,8 +123,7 @@ def patch_rom_verifier() -> None:
     old_connect = '\tfile_dialog.canceled.connect(file_prompt_closed)\n\n\tif OS.has_feature("android"):\n'
     new_connect = ('\tif not OS.has_feature("android") and file_dialog != null:\n'
                    '\t\tfile_dialog.canceled.connect(file_prompt_closed)\n\n'
-                   '\tif OS.has_feature("android"):\n'
-                   '\t\tOnScreenControls.should_show = false\n')
+                   '\tif OS.has_feature("android"):\n')
     if old_connect not in script:
         raise RuntimeError("Could not isolate desktop FileDialog connection in RomVerifier.gd")
     script = script.replace(old_connect, new_connect, 1)
@@ -134,16 +133,6 @@ def patch_rom_verifier() -> None:
     if old_show not in script:
         raise RuntimeError("Could not guard desktop FileDialog show call")
     script = script.replace(old_show, new_show, 1)
-
-    old_exit = ('func _exit_tree() -> void:\n'
-                '\tGlobal.get_node("GameHUD").show()\n')
-    new_exit = ('func _exit_tree() -> void:\n'
-                '\tGlobal.get_node("GameHUD").show()\n'
-                '\tif OS.has_feature("android"):\n'
-                '\t\tOnScreenControls.should_show = true\n')
-    if old_exit not in script:
-        raise RuntimeError("Could not patch RomVerifier exit handling")
-    script = script.replace(old_exit, new_exit, 1)
 
     script_path.write_text(script, encoding="utf-8")
 
