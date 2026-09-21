@@ -95,9 +95,6 @@ jobs:
       - name: Prepare Android export
         run: python3 android/prepare_android_export.py
 
-      - name: Install Android build template
-        run: godot --headless --path "$GITHUB_WORKSPACE" --install-android-build-template
-
       - name: Export debug APK
         shell: bash
         run: |
@@ -107,6 +104,7 @@ jobs:
           test -d "$GITHUB_WORKSPACE/build"
           set +e
           godot --headless --verbose --path "$GITHUB_WORKSPACE" \
+            --install-android-build-template \
             --export-debug "Android" "$APK_ABS" \
             2>&1 | tee "$LOG_ABS"
           EXPORT_STATUS=${PIPESTATUS[0]}
