@@ -25,10 +25,10 @@ def patch_global_transition() -> None:
 def patch_wrapper() -> None:
     path = ROOT / "Scripts" / "Wrapper.gd"
     text = path.read_text(encoding="utf-8")
-    old = '\tgame_viewport.add_child(new_scene)\n\tawait new_scene.ready\n'
-    new = ('\tgame_viewport.add_child(new_scene)\n'
-           '\t# add_child() enters the scene tree immediately; do not await ready here.\n'
-           '\t# Awaiting a signal that may already have fired can strand this coroutine.\n')
+    old = '    game_viewport.add_child(new_scene)\n    await new_scene.ready\n'
+    new = ('    game_viewport.add_child(new_scene)\n'
+           '    # add_child() enters the scene tree immediately; do not await ready here.\n'
+           '    # Awaiting a signal that may already have fired can strand this coroutine.\n')
     if old not in text:
         raise RuntimeError("Could not find generated new-scene ready wait in Wrapper.gd")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
