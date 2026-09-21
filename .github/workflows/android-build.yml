@@ -89,15 +89,36 @@ jobs:
         run: python3 android/prepare_android_export.py
 
       - name: Export debug APK
+        shell: bash
         run: |
           mkdir -p build
+          set +e
           godot --headless --verbose --path . \
             --install-android-build-template \
-            --export-debug "Android" "$APK_PATH"
+            --export-debug "Android" "$APK_PATH" \
+            2>&1 | tee build/android-export.log
+          EXPORT_STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "Godot export exit status: $EXPORT_STATUS" | tee -a build/android-export.log
+          if [ "$EXPORT_STATUS" -ne 0 ]; then
+            exit "$EXPORT_STATUS"
+          fi
           test -s "$APK_PATH"
           ls -lh "$APK_PATH"
 
+      - name: Upload export diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMB1R-1.1-android-diagnostics
+          path: |
+            build/android-export.log
+            export_presets.cfg
+            project.godot
+          if-no-files-found: warn
+
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: SMB1R-1.1-android-debug
