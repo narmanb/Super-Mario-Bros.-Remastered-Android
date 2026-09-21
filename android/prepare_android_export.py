@@ -32,6 +32,20 @@ def download_file_picker_aars() -> None:
         )
 
 
+def download_hidden_touch_assets() -> None:
+    """Supply the hidden Select textures referenced by the inherited scene."""
+    asset_dir = ROOT / "Assets" / "Sprites" / "UI" / "OnScreenControls"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("Select.png", "SelectHeld.png"):
+        destination = asset_dir / filename
+        if destination.exists() and destination.stat().st_size > 0:
+            continue
+        urllib.request.urlretrieve(
+            f"{OLD_ANDROID_RAW}/Assets/Sprites/UI/OnScreenControls/{filename}",
+            destination,
+        )
+
+
 def patch_project_settings() -> None:
     path = ROOT / "project.godot"
     text = path.read_text(encoding="utf-8")
@@ -106,6 +120,7 @@ def main() -> None:
     patch_project_settings()
     append_android_export_preset()
     fix_mobile_runtime.main()
+    download_hidden_touch_assets()
     (ROOT / "build").mkdir(exist_ok=True)
     print("Android export preparation complete")
 
