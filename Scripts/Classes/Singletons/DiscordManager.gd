@@ -1,6 +1,10 @@
 extends Node
 
-var enabled: bool = ProjectSettings.get_setting("application/use_discord", false) and not (OS.has_feature("linux") and OS.has_feature("arm64"))
+var enabled: bool = (
+	ProjectSettings.get_setting("application/use_discord", false)
+	and not OS.has_feature("android")
+	and not (OS.has_feature("linux") and OS.has_feature("arm64"))
+)
 var rpc = null
 
 class DiscordRPCStub:
@@ -13,16 +17,19 @@ class DiscordRPCStub:
 
 	func start(): pass
 	func refresh(): pass
+	func run_callbacks(): pass
 	func get_is_discord_working() -> bool: return false
 	func shutdown(): pass
 
 func _ready() -> void:
 	if enabled:
 		rpc = Engine.get_singleton("DiscordRPC")
-	else:
+		if rpc == null:
+			enabled = false
+	if not enabled:
 		rpc = DiscordRPCStub.new()
 	setup_discord_rpc()
-	
+
 func _process(_delta: float) -> void:
 	if enabled:
 		rpc.run_callbacks()
