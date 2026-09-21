@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 import fix_mobile_runtime
+import fix_runtime_followup
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD_ANDROID_COMMIT = "61fe0a6464101981cbee56701955fc0005f59664"
@@ -120,6 +121,7 @@ def main() -> None:
     patch_project_settings()
     append_android_export_preset()
     fix_mobile_runtime.main()
+    fix_runtime_followup.main()
     download_hidden_touch_assets()
     (ROOT / "build").mkdir(exist_ok=True)
     print("Android export preparation complete")
