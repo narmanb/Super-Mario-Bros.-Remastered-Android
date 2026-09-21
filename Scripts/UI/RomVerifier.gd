@@ -8,13 +8,14 @@ const VALID_HASHES := [
 
 var args: PackedStringArray
 var rom_arg: String = ""
+var android_picker = null
 @onready var file_dialog = $FileDialog
 
 func _ready() -> void:
 	args = OS.get_cmdline_args()
 	Global.get_node("GameHUD").hide()
 
-	# Try command line ROMs first
+	# Try command line ROMs first. This remains useful for desktop builds.
 	for i in range(args.size()):
 		match args[i]:
 			"-rom":
@@ -23,24 +24,33 @@ func _ready() -> void:
 					print("ROM argument found: ", rom_arg)
 	if rom_arg != "" and handle_rom(rom_arg):
 		return
-	
-	# Fallback: local ROM
+
+	%SelectRom.pressed.connect(file_prompt_open)
+	file_dialog.canceled.connect(file_prompt_closed)
+
+	if OS.has_feature("android"):
+		await get_tree().physics_frame
+		android_picker = Engine.get_singleton("GodotFilePicker")
+		if android_picker == null:
+			push_error("GodotFilePicker Android plugin is not available")
+			return
+		android_picker.file_picked.connect(on_android_file_selected)
+		return
+
+	# Desktop fallback: look beside the executable, then allow drag/drop or FileDialog.
 	var local_rom := find_local_rom()
 	if local_rom != "" and handle_rom(local_rom):
 		return
-	
-	# Otherwise wait for dropped/selected files
-	# SkyanUltra: Added button to select files for convenience
+
 	get_window().files_dropped.connect(on_file_dropped)
-	file_dialog.canceled.connect(file_prompt_closed)
-	%SelectRom.pressed.connect(file_prompt_open)
 	await get_tree().physics_frame
 
-	# Window setup
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 
 func find_local_rom() -> String:
+	if OS.has_feature("android"):
+		return ""
 	var exe_dir := OS.get_executable_path().get_base_dir()
 	var dir := DirAccess.open(exe_dir)
 	if not dir:
@@ -49,17 +59,32 @@ func find_local_rom() -> String:
 		if file_name.to_lower().ends_with(".nes"):
 			return exe_dir.path_join(file_name)
 	return ""
-  
+
 func on_file_dropped(files: PackedStringArray) -> void:
 	for file in files:
 		if handle_rom(file):
 			return
 	error()
-	
+
+func on_android_file_selected(temp_path: String, _mime_type: String) -> void:
+	var handled := handle_rom(temp_path)
+	# The picker returns a temporary local copy. Once handle_rom copies a valid ROM
+	# into user://, the temporary file is no longer needed.
+	DirAccess.remove_absolute(temp_path)
+	if not handled:
+		file_prompt_closed()
+
 func file_prompt_open() -> void:
-	$FileDialog.show()
 	%SelectRom.disabled = true
-	
+	if OS.has_feature("android"):
+		if android_picker != null:
+			android_picker.openFilePicker("*/*")
+		else:
+			push_error("Cannot open Android ROM picker: plugin singleton missing")
+			file_prompt_closed()
+		return
+	file_dialog.show()
+
 func file_prompt_closed() -> void:
 	%SelectRom.disabled = false
 
@@ -71,10 +96,14 @@ func handle_rom(path: String) -> bool:
 	if not is_valid_rom(path):
 		if path.get_extension() in ["nes", "nez", "fds", "qd", "unf", "unif", "nsf", "nsfe"]:
 			error()
-		else: extension_error()
+		else:
+			extension_error()
 		return false
-	Global.rom_path = path
+
+	# Always use the app-owned copy after verification. This avoids Android scoped
+	# storage/content-URI lifetime problems and is harmless on desktop.
 	copy_rom(path)
+	Global.rom_path = Global.ROM_PATH
 	verified()
 	return true
 
@@ -92,7 +121,6 @@ static func get_hash(file_path: String) -> String:
 static func is_valid_rom(rom_path := "") -> bool:
 	return get_hash(rom_path) in VALID_HASHES
 
-
 func error() -> void:
 	%Error.show()
 	%ZipError.hide()
@@ -104,7 +132,7 @@ func zip_error() -> void:
 	%Error.hide()
 	%ExtensionError.hide()
 	$ErrorSFX.play()
-	
+
 func extension_error() -> void:
 	%ExtensionError.show()
 	%Error.hide()
@@ -117,7 +145,7 @@ func verified() -> void:
 	%SuccessMSG.show()
 	$SuccessSFX.play()
 	await get_tree().create_timer(3, false).timeout
-	
+
 	var target_scene := "res://Scenes/Levels/TitleScreen.tscn"
 	if not Global.rom_assets_exist:
 		target_scene = "res://Scenes/Levels/RomResourceGenerator.tscn"
