@@ -95,23 +95,28 @@ jobs:
       - name: Prepare Android export
         run: python3 android/prepare_android_export.py
 
+      - name: Install Android build template
+        run: godot --headless --path "$GITHUB_WORKSPACE" --install-android-build-template
+
       - name: Export debug APK
         shell: bash
         run: |
-          mkdir -p build
+          APK_ABS="$GITHUB_WORKSPACE/$APK_PATH"
+          LOG_ABS="$GITHUB_WORKSPACE/build/android-export.log"
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          test -d "$GITHUB_WORKSPACE/build"
           set +e
-          godot --headless --verbose --path . \
-            --install-android-build-template \
-            --export-debug "Android" "$APK_PATH" \
-            2>&1 | tee build/android-export.log
+          godot --headless --verbose --path "$GITHUB_WORKSPACE" \
+            --export-debug "Android" "$APK_ABS" \
+            2>&1 | tee "$LOG_ABS"
           EXPORT_STATUS=${PIPESTATUS[0]}
           set -e
-          echo "Godot export exit status: $EXPORT_STATUS" | tee -a build/android-export.log
+          echo "Godot export exit status: $EXPORT_STATUS" | tee -a "$LOG_ABS"
           if [ "$EXPORT_STATUS" -ne 0 ]; then
             exit "$EXPORT_STATUS"
           fi
-          test -s "$APK_PATH"
-          ls -lh "$APK_PATH"
+          test -s "$APK_ABS"
+          ls -lh "$APK_ABS"
 
       - name: Upload export diagnostics
         if: always()
