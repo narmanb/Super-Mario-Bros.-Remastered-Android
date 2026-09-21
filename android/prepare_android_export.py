@@ -5,6 +5,7 @@ The script intentionally keeps most Android-only changes out of upstream project
 - downloads the proven native file-picker AARs from the previous Android port,
 - disables the desktop Discord GDExtension for the Android export,
 - applies the mobile layout/orientation settings used by the working 1.0.2 port,
+- enables ETC2/ASTC imports required for Android export from an x86_64 host,
 - appends a minimal ARM64 Android export preset if one is not present.
 """
 
@@ -74,6 +75,17 @@ def patch_project_settings() -> None:
             'window/stretch/aspect="expand"\nwindow/handheld/orientation=4',
         )
 
+    # Godot 4.6 Android export validates that ETC2/ASTC imports are enabled.
+    # On an x86_64 Linux host, the default S3TC preference can otherwise yield
+    # a blank "configuration errors" message (Godot issue #119895).
+    etc2_setting = "textures/vram_compression/import_etc2_astc=true"
+    if etc2_setting not in text:
+        rendering_marker = "[rendering]\n"
+        if rendering_marker in text:
+            text = text.replace(rendering_marker, rendering_marker + "\n" + etc2_setting + "\n", 1)
+        else:
+            text = text.rstrip() + "\n\n[rendering]\n\n" + etc2_setting + "\n"
+
     path.write_text(text, encoding="utf-8")
 
     shutil.rmtree(ROOT / "addons" / "discord-rpc-gd", ignore_errors=True)
@@ -89,7 +101,7 @@ def append_android_export_preset() -> None:
     indices = [int(value) for value in re.findall(r"^\[preset\.(\d+)\]$", text, re.MULTILINE)]
     index = max(indices, default=-1) + 1
 
-    preset = f'''\n\n[preset.{index}]\n\nname="Android"\nplatform="Android"\nrunnable=true\nadvanced_options=true\ndedicated_server=false\ncustom_features=""\nexport_filter="all_resources"\ninclude_filter="*.bgm, *.mp3, *.txt, *.fnt, version.txt"\nexclude_filter=""\nexport_path="build/SMB1R-1.1-android-debug.apk"\npatches=PackedStringArray()\nencryption_include_filters=""\nencryption_exclude_filters=""\nseed=0\nencrypt_pck=false\nencrypt_directory=false\nscript_export_mode=2\n\n[preset.{index}.options]\n\ncustom_template/debug=""\ncustom_template/release=""\ngradle_build/use_gradle_build=true\ngradle_build/gradle_build_directory=""\ngradle_build/android_source_template=""\ngradle_build/export_format=0\narchitectures/armeabi-v7a=false\narchitectures/arm64-v8a=true\narchitectures/x86=false\narchitectures/x86_64=false\nversion/code=110\nversion/name="1.1-android-dev"\npackage/unique_name="com.narmanb.smb1r"\npackage/name="Super Mario Bros. Remastered"\npackage/signed=true\npackage/app_category=2\npackage/retain_data_on_uninstall=true\npackage/exclude_from_recents=false\npackage/show_in_android_tv=false\npackage/show_in_app_library=true\npackage/show_as_launcher_app=false\ngraphics/opengl_debug=false\nshader_baker/enabled=false\nxr_features/xr_mode=0\ngesture/swipe_to_dismiss=false\nscreen/immersive_mode=true\nscreen/support_small=true\nscreen/support_normal=true\nscreen/support_large=true\nscreen/support_xlarge=true\nscreen/edge_to_edge=true\nuser_data_backup/allow=true\ncommand_line/extra_args=""\napk_expansion/enable=false\npermissions/internet=true\n'''
+    preset = f'''\n\n[preset.{index}]\n\nname="Android"\nplatform="Android"\nrunnable=true\nadvanced_options=true\ndedicated_server=false\ncustom_features=""\nexport_filter="all_resources"\ninclude_filter="*.bgm, *.mp3, *.txt, *.fnt, version.txt"\nexclude_filter=""\nexport_path="build/SMB1R-1.1-android-debug.apk"\npatches=PackedStringArray()\nencryption_include_filters=""\nencryption_exclude_filters=""\nseed=0\nencrypt_pck=false\nencrypt_directory=false\nscript_export_mode=2\n\n[preset.{index}.options]\n\ncustom_template/debug=""\ncustom_template/release=""\ngradle_build/use_gradle_build=true\ngradle_build/gradle_build_directory=""\ngradle_build/android_source_template=""\ngradle_build/compress_native_libraries=false\ngradle_build/export_format=0\ngradle_build/min_sdk=""\ngradle_build/target_sdk=""\ngradle_build/custom_theme_attributes={{}}\narchitectures/armeabi-v7a=false\narchitectures/arm64-v8a=true\narchitectures/x86=false\narchitectures/x86_64=false\nversion/code=110\nversion/name="1.1-android-dev"\npackage/unique_name="com.narmanb.smb1r"\npackage/name="Super Mario Bros. Remastered"\npackage/signed=true\npackage/app_category=2\npackage/retain_data_on_uninstall=true\npackage/exclude_from_recents=false\npackage/show_in_android_tv=false\npackage/show_in_app_library=true\npackage/show_as_launcher_app=false\nlauncher_icons/main_192x192=""\nlauncher_icons/adaptive_foreground_432x432=""\nlauncher_icons/adaptive_background_432x432=""\nlauncher_icons/adaptive_monochrome_432x432=""\ngraphics/opengl_debug=false\nshader_baker/enabled=false\nxr_features/xr_mode=0\ngesture/swipe_to_dismiss=false\nscreen/immersive_mode=true\nscreen/support_small=true\nscreen/support_normal=true\nscreen/support_large=true\nscreen/support_xlarge=true\nscreen/edge_to_edge=true\nscreen/background_color=Color(0, 0, 0, 1)\nuser_data_backup/allow=true\ncommand_line/extra_args=""\napk_expansion/enable=false\napk_expansion/SALT=""\napk_expansion/public_key=""\npermissions/custom_permissions=PackedStringArray()\npermissions/internet=true\n'''
 
     path.write_text(text.rstrip() + preset + "\n", encoding="utf-8")
     print(f"Added Android export preset as preset.{index}")
