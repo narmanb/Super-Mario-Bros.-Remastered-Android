@@ -34,5 +34,7 @@ func go_to_menu() -> void:
 		Global.transition_to_scene("res://Scenes/Levels/RomVerifier.tscn")
 	elif not Global.rom_assets_exist:
 		Global.transition_to_scene("res://Scenes/Levels/RomResourceGenerator.tscn")
+	elif OS.has_feature("android"):
+		Global.transition_to_scene("res://Scenes/Levels/AndroidTitleProbe.tscn")
 	else:
 		Global.transition_to_scene("res://Scenes/Levels/TitleScreen.tscn")
