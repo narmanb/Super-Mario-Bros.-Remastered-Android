@@ -36,57 +36,85 @@ func _show_android_probe_stage(message: String, seconds := 2.5) -> void:
 	print("[ANDROID_TITLE_PROBE] ", message)
 	await get_tree().create_timer(seconds, false).timeout
 
+func _disable_scripts_recursive(node: Node, include_node := true) -> int:
+	var disabled := 0
+	if include_node and node.get_script() != null:
+		node.set_script(null)
+		disabled += 1
+	for child in node.get_children():
+		disabled += _disable_scripts_recursive(child, true)
+	return disabled
+
+func _free_probe_scene(node: Node) -> void:
+	node.queue_free()
+	await node.tree_exited
+	await get_tree().process_frame
+
 func _run_android_title_probe() -> void:
 	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
 
-	await _show_android_probe_stage("PROBE 1/8 GENERATOR DONE")
-	await _show_android_probe_stage("PROBE 2/8 BEFORE LOAD")
-
+	await _show_android_probe_stage("PROBE 1 LOAD TITLE")
 	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
 	if packed == null:
 		$MarginContainer/ProgressBar/Label.text = "PROBE FAILED LOAD NULL"
-		push_error("[ANDROID_TITLE_PROBE] TitleScreen load returned null")
 		return
 
-	await _show_android_probe_stage("PROBE 3/8 LOAD RETURNED")
-	await _show_android_probe_stage("PROBE 4/8 BEFORE INSTANTIATE")
-
-	var title_scene := packed.instantiate()
-	if title_scene == null:
-		$MarginContainer/ProgressBar/Label.text = "PROBE FAILED INSTANCE NULL"
-		push_error("[ANDROID_TITLE_PROBE] TitleScreen instantiate returned null")
-		return
-
-	await _show_android_probe_stage("PROBE 5/8 INSTANCE RETURNED")
-	await _show_android_probe_stage("PROBE 6/8 BEFORE ADD CHILD", 3.0)
-
-	# Keep this generator scene alive and add TitleScreen underneath it instead
-	# of transitioning through Wrapper.gd. add_child() enters the new scene tree
-	# synchronously, so a crash in TitleScreen _enter_tree/_ready or child setup
-	# will occur after stage 6 but before stage 7 appears.
-	add_child(title_scene)
-
-	await _show_android_probe_stage("PROBE 7/8 ADD CHILD RETURNED", 3.0)
+	# Phase A: remove every GDScript before the scene enters the tree. If this
+	# still crashes in add_child(), the failure is in native/resource/node setup,
+	# not _enter_tree/_ready code from GDScript.
+	var no_scripts := packed.instantiate()
+	var disabled_all := _disable_scripts_recursive(no_scripts, true)
+	await _show_android_probe_stage("A1 ALL SCRIPTS OFF: " + str(disabled_all))
+	await _show_android_probe_stage("A2 BEFORE ADD - NO SCRIPTS", 3.0)
+	add_child(no_scripts)
+	await _show_android_probe_stage("A3 ADD OK - NO SCRIPTS", 2.0)
 	await get_tree().process_frame
-	await _show_android_probe_stage("PROBE 8/8 SURVIVED FRAME", 10.0)
+	await _show_android_probe_stage("A4 FRAME OK - NO SCRIPTS", 2.0)
+	await _free_probe_scene(no_scripts)
+
+	# Phase B: keep only the root TitleScreen.gd script. All descendant scripts
+	# are disabled, so a crash here points at TitleScreen.gd / Level root logic.
+	var root_only := packed.instantiate()
+	var disabled_descendants := 0
+	for child in root_only.get_children():
+		disabled_descendants += _disable_scripts_recursive(child, true)
+	await _show_android_probe_stage("B1 ROOT SCRIPT ONLY")
+	await _show_android_probe_stage("B2 BEFORE ADD - ROOT ONLY", 3.0)
+	add_child(root_only)
+	await _show_android_probe_stage("B3 ADD OK - ROOT ONLY", 2.0)
+	await get_tree().process_frame
+	await _show_android_probe_stage("B4 FRAME OK - ROOT ONLY", 2.0)
+	await _free_probe_scene(root_only)
+
+	# Phase C: disable only the root script, leaving all descendant scene scripts
+	# active. A crash here means one of the child scripts/scenes is responsible.
+	var children_only := packed.instantiate()
+	if children_only.get_script() != null:
+		children_only.set_script(null)
+	await _show_android_probe_stage("C1 CHILD SCRIPTS ONLY")
+	await _show_android_probe_stage("C2 BEFORE ADD - CHILD SCRIPTS", 3.0)
+	add_child(children_only)
+	await _show_android_probe_stage("C3 ADD OK - CHILD SCRIPTS", 2.0)
+	await get_tree().process_frame
+	await _show_android_probe_stage("C4 FRAME OK - CHILD SCRIPTS", 10.0)
 
 func generate_resource_pack() -> void:
 	DirAccess.make_dir_recursive_absolute(Global.ROM_ASSETS_PATH)
-	
+
 	var pack_json: String = FileAccess.get_file_as_string("res://Resources/AssetRipper/ResourcePack/pack_info.json")
 	var pack_dict: Dictionary = JSON.parse_string(pack_json)
 	pack_dict.set("version", Global.ROM_ASSETS_VERSION)
-	
+
 	var pack_file := FileAccess.open(Global.ROM_ASSETS_PATH + "/pack_info.json", FileAccess.WRITE)
 	pack_file.store_line(JSON.stringify(pack_dict))
 	pack_file.close()
-	
+
 	var list_json: String = FileAccess.get_file_as_string(SPRITE_LIST_PATH)
 	var list_dict: Dictionary = JSON.parse_string(list_json)
-	
+
 	var sprite_list: Array = list_dict.get("sprites", [])
 	progress_bar.max_value = sprite_list.size()
-	
+
 	var sprites_handled: int = 0
 	for sprite_path in sprite_list:
 		var json_path: String = png_path_to_json(sprite_path)
@@ -100,22 +128,20 @@ func generate_resource_pack() -> void:
 		if FileAccess.file_exists(json_path):
 			var json_string: String = FileAccess.get_file_as_string(json_path)
 			var json_dict: Dictionary = JSON.parse_string(json_string)
-			
+
 			paste_sprite(sprite_image, json_dict)
-			
+
 			var destination_path: String = get_destination_path(sprite_path)
 			if not DirAccess.dir_exists_absolute(destination_path.get_base_dir()):
 				DirAccess.make_dir_recursive_absolute(destination_path.get_base_dir())
 			sprite_image.save_png(destination_path)
-		
-		sprites_handled += 1 
+
+		sprites_handled += 1
 		progress_bar.value = sprites_handled
 		await get_tree().process_frame
-	
+
 	if sprites_handled < sprite_list.size():
 		error.show()
-		## uncomment this once the initial jsons are fully setup so that the game won't
-		## boot if the resource pack loading is borked
 		OS.move_to_trash(Global.ROM_ASSETS_PATH)
 	else:
 		done()
@@ -124,28 +150,28 @@ func paste_sprite(sprite_image: Image, json_dict: Dictionary):
 	var columns: int = str_to_var(json_dict.get("columns", "4"))
 	var sheet_size: Vector2i = str_to_var(json_dict.get("sheet_size", "Vector2i(16, 16)"))
 	var palette_base: String = json_dict.get("palette_base", "Tile")
-	
+
 	var palette_var: Variant = str_to_var(json_dict.get("palettes", "{}"))
 	var palette_lists: Dictionary
 	if typeof(palette_var) == TYPE_ARRAY:
 		palette_lists[palette_base] = palette_var
 	elif typeof(palette_var) == TYPE_DICTIONARY:
 		palette_lists = palette_var
-	
+
 	var tile_list: Dictionary = str_to_var(json_dict.get("tiles", "{}"))
 	var img_size: Vector2i = sprite_image.get_size()
-	
+
 	for palette_name in palette_lists.keys():
 		var cur_column: int = 0
 		var offset := Vector2.ZERO
-		
+
 		var pal_json: String = FileAccess.get_file_as_string(
 			PALETTES_FOLDER % [DEFAULT_PALETTE_GROUP, palette_name])
 		var pal_dict: Dictionary = JSON.parse_string(pal_json).palettes
-		
+
 		for palette_id: String in palette_lists[palette_name]:
 			var palette: Array = pal_dict.get(palette_id, PREVIEW_PALETTE)
-			
+
 			for tile_pos: Vector2 in tile_list:
 				var tile_dict: Dictionary = tile_list[tile_pos]
 				var tile_palette: String = tile_dict.get("palette", palette_base)
@@ -155,13 +181,13 @@ func paste_sprite(sprite_image: Image, json_dict: Dictionary):
 						draw_tile(
 							true,
 							sprite_image,
-							tile_dict.get("index", 0), 
+							tile_dict.get("index", 0),
 							destination,
 							palette,
 							tile_dict.get("flip_h", false),
 							tile_dict.get("flip_v", false)
 						)
-			
+
 			cur_column += 1
 			if cur_column >= columns:
 				cur_column = 0
