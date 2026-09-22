@@ -192,7 +192,7 @@ def patch_rom_verifier() -> None:
     scene = scene_path.read_text(encoding="utf-8")
 
     scene, node_count = re.subn(
-        r'\n\[node name="FileDialog" type="FileDialog" parent="\."[^\\n]*\]\n.*?(?=\n\[connection|\Z)',
+        r'\n\[node name="FileDialog" type="FileDialog" parent="\."[^\n]*\]\n.*?(?=\n\[connection|\Z)',
         '\n',
         scene,
         count=1,
