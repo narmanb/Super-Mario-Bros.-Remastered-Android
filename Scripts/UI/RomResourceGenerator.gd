@@ -33,7 +33,7 @@ func done() -> void:
 func _show_android_probe_stage(message: String, seconds := 2.5) -> void:
 	progress_bar.value = progress_bar.max_value
 	$MarginContainer/ProgressBar/Label.text = message
-	print("[ANDROID_TITLE_PROBE] ", message)
+	print("[ANDROID_TITLE_ROOT_PROBE] ", message)
 	await get_tree().create_timer(seconds, false).timeout
 
 func _disable_scripts_recursive(node: Node, include_node := true) -> int:
@@ -50,53 +50,66 @@ func _free_probe_scene(node: Node) -> void:
 	await node.tree_exited
 	await get_tree().process_frame
 
+func _make_root_lifecycle_probe(packed: PackedScene, mode: AndroidTitleScreenLifecycleProbe.ProbeMode) -> Node:
+	var instance := packed.instantiate()
+	for child in instance.get_children():
+		_disable_scripts_recursive(child, true)
+	AndroidTitleScreenLifecycleProbe.probe_mode = mode
+	instance.set_script(load("res://Scripts/Parts/AndroidTitleScreenLifecycleProbe.gd"))
+	# Keep this diagnostic focused on synchronous scene-tree entry callbacks.
+	# The normal TitleScreen _process() must not run between add_child and marker.
+	instance.set_process(false)
+	instance.set_physics_process(false)
+	return instance
+
+func _run_root_probe_phase(packed: PackedScene, phase: String, mode: AndroidTitleScreenLifecycleProbe.ProbeMode, description: String) -> void:
+	var instance := _make_root_lifecycle_probe(packed, mode)
+	await _show_android_probe_stage(phase + "1 " + description)
+	await _show_android_probe_stage(phase + "2 BEFORE ADD", 3.0)
+	add_child(instance)
+	await _show_android_probe_stage(phase + "3 ADD RETURNED", 2.0)
+	await get_tree().process_frame
+	await _show_android_probe_stage(phase + "4 FRAME SURVIVED", 2.0)
+	await _free_probe_scene(instance)
+
 func _run_android_title_probe() -> void:
 	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
 
-	await _show_android_probe_stage("PROBE 1 LOAD TITLE")
+	await _show_android_probe_stage("ROOT PROBE LOAD TITLE")
 	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
 	if packed == null:
-		$MarginContainer/ProgressBar/Label.text = "PROBE FAILED LOAD NULL"
+		$MarginContainer/ProgressBar/Label.text = "ROOT PROBE LOAD FAILED"
 		return
 
-	# Phase A: remove every GDScript before the scene enters the tree. If this
-	# still crashes in add_child(), the failure is in native/resource/node setup,
-	# not _enter_tree/_ready code from GDScript.
-	var no_scripts := packed.instantiate()
-	var disabled_all := _disable_scripts_recursive(no_scripts, true)
-	await _show_android_probe_stage("A1 ALL SCRIPTS OFF: " + str(disabled_all))
-	await _show_android_probe_stage("A2 BEFORE ADD - NO SCRIPTS", 3.0)
-	add_child(no_scripts)
-	await _show_android_probe_stage("A3 ADD OK - NO SCRIPTS", 2.0)
-	await get_tree().process_frame
-	await _show_android_probe_stage("A4 FRAME OK - NO SCRIPTS", 2.0)
-	await _free_probe_scene(no_scripts)
+	# D: TitleScreen-derived root with both parent lifecycle callback bodies
+	# suppressed. If D dies between D2 and D3, the failure happens before those
+	# bodies: inherited/script/onready initialization or another root-level hook.
+	await _run_root_probe_phase(
+		packed,
+		"D",
+		AndroidTitleScreenLifecycleProbe.ProbeMode.SKIP_BOTH,
+		"SKIP ENTER + READY"
+	)
 
-	# Phase B: keep only the root TitleScreen.gd script. All descendant scripts
-	# are disabled, so a crash here points at TitleScreen.gd / Level root logic.
-	var root_only := packed.instantiate()
-	var disabled_descendants := 0
-	for child in root_only.get_children():
-		disabled_descendants += _disable_scripts_recursive(child, true)
-	await _show_android_probe_stage("B1 ROOT SCRIPT ONLY")
-	await _show_android_probe_stage("B2 BEFORE ADD - ROOT ONLY", 3.0)
-	add_child(root_only)
-	await _show_android_probe_stage("B3 ADD OK - ROOT ONLY", 2.0)
-	await get_tree().process_frame
-	await _show_android_probe_stage("B4 FRAME OK - ROOT ONLY", 2.0)
-	await _free_probe_scene(root_only)
+	# E: run only the real TitleScreen._enter_tree() body. _ready() is suppressed.
+	# A D pass followed by E2 -> crash identifies _enter_tree() as sufficient.
+	await _run_root_probe_phase(
+		packed,
+		"E",
+		AndroidTitleScreenLifecycleProbe.ProbeMode.ENTER_ONLY,
+		"REAL ENTER ONLY"
+	)
 
-	# Phase C: disable only the root script, leaving all descendant scene scripts
-	# active. A crash here means one of the child scripts/scenes is responsible.
-	var children_only := packed.instantiate()
-	if children_only.get_script() != null:
-		children_only.set_script(null)
-	await _show_android_probe_stage("C1 CHILD SCRIPTS ONLY")
-	await _show_android_probe_stage("C2 BEFORE ADD - CHILD SCRIPTS", 3.0)
-	add_child(children_only)
-	await _show_android_probe_stage("C3 ADD OK - CHILD SCRIPTS", 2.0)
-	await get_tree().process_frame
-	await _show_android_probe_stage("C4 FRAME OK - CHILD SCRIPTS", 10.0)
+	# F: suppress _enter_tree(), then run the real TitleScreen._ready() body.
+	# A D/E pass followed by F2 -> crash identifies _ready() as sufficient.
+	await _run_root_probe_phase(
+		packed,
+		"F",
+		AndroidTitleScreenLifecycleProbe.ProbeMode.READY_ONLY,
+		"REAL READY ONLY"
+	)
+
+	await _show_android_probe_stage("ROOT PROBE ALL PHASES SURVIVED", 10.0)
 
 func generate_resource_pack() -> void:
 	DirAccess.make_dir_recursive_absolute(Global.ROM_ASSETS_PATH)
