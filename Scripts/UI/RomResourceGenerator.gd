@@ -18,14 +18,57 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	Global.get_node("GameHUD").show()
 
-
-
 func done() -> void:
 	if not Settings.file.visuals.resource_packs.has(Global.ROM_PACK_NAME):
 		Settings.file.visuals.resource_packs.insert(0, Global.ROM_PACK_NAME)
-		
+
+	if OS.has_feature("android"):
+		Global.rom_assets_exist = true
+		await _run_android_title_probe()
+		return
+
 	await get_tree().create_timer(0.5).timeout
 	Global.transition_to_scene("res://Scenes/Levels/TitleScreen.tscn")
+
+func _show_android_probe_stage(message: String, seconds := 2.5) -> void:
+	progress_bar.value = progress_bar.max_value
+	$MarginContainer/ProgressBar/Label.text = message
+	print("[ANDROID_TITLE_PROBE] ", message)
+	await get_tree().create_timer(seconds, false).timeout
+
+func _run_android_title_probe() -> void:
+	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
+
+	await _show_android_probe_stage("PROBE 1/8 GENERATOR DONE")
+	await _show_android_probe_stage("PROBE 2/8 BEFORE LOAD")
+
+	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
+	if packed == null:
+		$MarginContainer/ProgressBar/Label.text = "PROBE FAILED LOAD NULL"
+		push_error("[ANDROID_TITLE_PROBE] TitleScreen load returned null")
+		return
+
+	await _show_android_probe_stage("PROBE 3/8 LOAD RETURNED")
+	await _show_android_probe_stage("PROBE 4/8 BEFORE INSTANTIATE")
+
+	var title_scene := packed.instantiate()
+	if title_scene == null:
+		$MarginContainer/ProgressBar/Label.text = "PROBE FAILED INSTANCE NULL"
+		push_error("[ANDROID_TITLE_PROBE] TitleScreen instantiate returned null")
+		return
+
+	await _show_android_probe_stage("PROBE 5/8 INSTANCE RETURNED")
+	await _show_android_probe_stage("PROBE 6/8 BEFORE ADD CHILD", 3.0)
+
+	# Keep this generator scene alive and add TitleScreen underneath it instead
+	# of transitioning through Wrapper.gd. add_child() enters the new scene tree
+	# synchronously, so a crash in TitleScreen _enter_tree/_ready or child setup
+	# will occur after stage 6 but before stage 7 appears.
+	add_child(title_scene)
+
+	await _show_android_probe_stage("PROBE 7/8 ADD CHILD RETURNED", 3.0)
+	await get_tree().process_frame
+	await _show_android_probe_stage("PROBE 8/8 SURVIVED FRAME", 10.0)
 
 func generate_resource_pack() -> void:
 	DirAccess.make_dir_recursive_absolute(Global.ROM_ASSETS_PATH)
@@ -65,9 +108,9 @@ func generate_resource_pack() -> void:
 				DirAccess.make_dir_recursive_absolute(destination_path.get_base_dir())
 			sprite_image.save_png(destination_path)
 		
-			sprites_handled += 1 
-			progress_bar.value = sprites_handled
-			await get_tree().process_frame
+		sprites_handled += 1 
+		progress_bar.value = sprites_handled
+		await get_tree().process_frame
 	
 	if sprites_handled < sprite_list.size():
 		error.show()

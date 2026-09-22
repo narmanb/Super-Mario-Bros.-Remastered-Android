@@ -32,9 +32,12 @@ func go_to_menu() -> void:
 	ResourceGenerator.updating = true
 	if Global.rom_path == "":
 		Global.transition_to_scene("res://Scenes/Levels/RomVerifier.tscn")
+	elif OS.has_feature("android"):
+		# Diagnostic build: always enter the proven-working generator scene so
+		# the TitleScreen load/instantiate/add_child probe runs without asking
+		# the Android wrapper to perform another scene transition first.
+		Global.transition_to_scene("res://Scenes/Levels/RomResourceGenerator.tscn")
 	elif not Global.rom_assets_exist:
 		Global.transition_to_scene("res://Scenes/Levels/RomResourceGenerator.tscn")
-	elif OS.has_feature("android"):
-		Global.transition_to_scene("res://Scenes/Levels/AndroidTitleProbe.tscn")
 	else:
 		Global.transition_to_scene("res://Scenes/Levels/TitleScreen.tscn")
