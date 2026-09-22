@@ -25,13 +25,12 @@ def patch_global_transition() -> None:
 def patch_wrapper() -> None:
     path = ROOT / "Scripts" / "Wrapper.gd"
     text = path.read_text(encoding="utf-8")
-    old = '    game_viewport.add_child(new_scene)\n    await new_scene.ready\n'
-    new = ('    game_viewport.add_child(new_scene)\n'
-           '    # add_child() enters the scene tree immediately; do not await ready here.\n'
-           '    # Awaiting a signal that may already have fired can strand this coroutine.\n')
-    if old not in text:
-        raise RuntimeError("Could not find generated new-scene ready wait in Wrapper.gd")
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    expected = '    game_viewport.add_child(new_scene)\n    await new_scene.ready\n'
+    if expected not in text:
+        raise RuntimeError("Generated Android wrapper is missing the proven new-scene ready wait")
+    # Keep this wait. The pinned working Android fork waits for the newly added
+    # scene to become ready inside Wrapper.change_scene_to(). Global itself
+    # starts the wrapper transition without awaiting it, matching that fork.
 
 
 def patch_touch_positions() -> None:
