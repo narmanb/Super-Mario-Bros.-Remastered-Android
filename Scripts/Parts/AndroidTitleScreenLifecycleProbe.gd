@@ -39,6 +39,30 @@ func _mark(code: String, description: String, seconds := 1.25) -> void:
 	await get_tree().process_frame
 	await get_tree().create_timer(seconds, false).timeout
 
+func _probe_level_theme_listeners() -> void:
+	# U05 proved the crash occurs while emitting level_theme_changed. Snapshot
+	# the live connection list and invoke each listener individually so one
+	# hardware run identifies the exact callback that kills the process.
+	var connections := Global.get_signal_connection_list("level_theme_changed")
+	await _mark("V00", "LIVE LISTENERS: %d" % connections.size(), 1.5)
+	for i in range(connections.size()):
+		var connection: Dictionary = connections[i]
+		var callback: Callable = connection.get("callable", Callable())
+		var target_desc := "<invalid>"
+		var method_desc := str(callback.get_method())
+		var target = callback.get_object()
+		if is_instance_valid(target):
+			if target is Node:
+				target_desc = str((target as Node).get_path())
+			else:
+				target_desc = str(target)
+		var code := "V%02d" % (i + 1)
+		await _mark(code, "BEFORE " + target_desc + "::" + method_desc, 1.0)
+		if callback.is_valid():
+			callback.call()
+		await _mark(code + "R", "RETURNED " + target_desc + "::" + method_desc, 0.35)
+	await _mark("V99", "ALL level_theme_changed LISTENERS RETURNED", 1.5)
+
 func _probe_global_update_theme() -> void:
 	# Inline Global.update_theme() exactly so T01 can be narrowed to one operation.
 	await _mark("U01", "BEFORE theme_override reset")
@@ -49,8 +73,8 @@ func _probe_global_update_theme() -> void:
 	Global.get_node("ThemeGetter").update_resource()
 	await _mark("U04", "BEFORE ResourceSetterNew.clear_cache")
 	ResourceSetterNew.clear_cache()
-	await _mark("U05", "BEFORE level_theme_changed emit")
-	Global.level_theme_changed.emit()
+	await _mark("U05", "BEFORE level_theme_changed listeners")
+	await _probe_level_theme_listeners()
 	await _mark("U06", "Global.update_theme COMPLETE")
 
 func _probe_update_theme() -> void:
