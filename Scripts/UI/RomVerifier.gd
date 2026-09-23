@@ -147,7 +147,7 @@ func verified() -> void:
 	await get_tree().create_timer(3, false).timeout
 
 	var target_scene := "res://Scenes/Levels/TitleScreen.tscn"
-	if not Global.rom_assets_exist:
+	if OS.has_feature("android") or not Global.rom_assets_exist:
 		target_scene = "res://Scenes/Levels/RomResourceGenerator.tscn"
 	Global.transition_to_scene(target_scene)
 

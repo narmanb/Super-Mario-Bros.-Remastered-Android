@@ -1,6 +1,9 @@
 class_name AndroidTitleScreenLifecycleProbe
 extends TitleScreen
 
+const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
+const LISTENER_GROUP_SIZE := 64
+
 func _enter_tree() -> void:
 	# Match Run 31's failing F phase: suppress TitleScreen._enter_tree().
 	return
@@ -21,17 +24,18 @@ func _get_probe_overlay_label() -> Label:
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.add_theme_font_size_override("font_size", 26)
 		label.add_theme_constant_override("outline_size", 8)
 		label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 		label.offset_left = 0
 		label.offset_top = 72
 		label.offset_right = 0
-		label.offset_bottom = 132
+		label.offset_bottom = 250
 		layer.add_child(label)
 	return label
 
-func _mark(code: String, description: String, seconds := 1.25) -> void:
+func _mark(code: String, description: String, seconds := 0.1) -> void:
 	var label := _get_probe_overlay_label()
 	label.text = code + "  " + description
 	print("[ANDROID_TITLE_READY_PROBE] ", code, " ", description)
@@ -39,31 +43,78 @@ func _mark(code: String, description: String, seconds := 1.25) -> void:
 	await get_tree().process_frame
 	await get_tree().create_timer(seconds, false).timeout
 
-func _probe_level_theme_listeners() -> void:
-	# U05 proved the crash occurs while emitting level_theme_changed. Snapshot
-	# the live connection list and invoke each listener individually so one
-	# hardware run identifies the exact callback that kills the process.
-	var connections := Global.get_signal_connection_list("level_theme_changed")
-	await _mark("V00", "LIVE LISTENERS: %d" % connections.size(), 1.5)
-	for i in range(connections.size()):
-		var connection: Dictionary = connections[i]
-		var callback: Callable = connection.get("callable", Callable())
-		var target_desc := "<invalid>"
-		var method_desc := str(callback.get_method())
-		var target = callback.get_object()
-		if is_instance_valid(target):
-			if target is Node:
-				target_desc = str((target as Node).get_path())
-			else:
-				target_desc = str(target)
-		var code := "V%02d" % (i + 1)
-		await _mark(code, "BEFORE " + target_desc + "::" + method_desc, 1.0)
-		if callback.is_valid():
-			callback.call()
-		await _mark(code + "R", "RETURNED " + target_desc + "::" + method_desc, 0.35)
-	await _mark("V99", "ALL level_theme_changed LISTENERS RETURNED", 1.5)
+func _listener_description(callback: Callable) -> String:
+	var target = callback.get_object()
+	var target_desc := "<invalid>"
+	if is_instance_valid(target):
+		if target is Node:
+			target_desc = str((target as Node).get_path())
+		else:
+			target_desc = str(target)
+	return target_desc + "::" + str(callback.get_method())
 
-func _probe_global_update_theme() -> void:
+func _read_listener_checkpoint() -> Dictionary:
+	if not FileAccess.file_exists(LISTENER_PROBE_PATH):
+		return {}
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(LISTENER_PROBE_PATH))
+	return parsed if parsed is Dictionary else {}
+
+func _write_listener_checkpoint(state: Dictionary) -> bool:
+	var file := FileAccess.open(LISTENER_PROBE_PATH, FileAccess.WRITE)
+	if file == null:
+		push_error("Could not persist Android theme probe: " + str(FileAccess.get_open_error()))
+		return false
+	file.store_string(JSON.stringify(state))
+	file.flush() # This must reach storage before the potentially fatal call.
+	file.close()
+	return true
+
+func _probe_level_theme_listeners() -> bool:
+	# Keep the original connection order, but remove the per-listener render
+	# delay. A durable before/after checkpoint identifies a synchronous crash
+	# on the next launch, without logcat or another build.
+	var connections := Global.get_signal_connection_list("level_theme_changed")
+	var previous := _read_listener_checkpoint()
+	if previous.get("status", "") == "running":
+		var index := int(previous.get("index", -1))
+		var last := str(previous.get("listener", "<unknown>"))
+		var phase := str(previous.get("phase", "unknown"))
+		var current := "<missing from new snapshot>"
+		if index >= 0 and index < connections.size():
+			current = _listener_description(connections[index].get("callable", Callable()))
+		var verdict := "LAST STARTED" if phase == "before" else "LAST RETURNED"
+		await _mark("V FOUND", "%s %d/%d\n%s\nNow: %s" % [verdict, index + 1, int(previous.get("count", 0)), last, current], 3600.0)
+		return false
+	if previous.get("status", "") == "complete":
+		await _mark("V DONE", "All %d listeners returned in previous run" % int(previous.get("count", 0)), 3600.0)
+		return false
+	await _mark("V00", "TESTING %d LISTENERS IN FAST GROUPS" % connections.size(), 0.8)
+	for group_start in range(0, connections.size(), LISTENER_GROUP_SIZE):
+		var group_end := mini(group_start + LISTENER_GROUP_SIZE, connections.size())
+		# One visible group marker; callbacks within it run with no timer.
+		_get_probe_overlay_label().text = "V %d-%d/%d  TESTING" % [group_start + 1, group_end, connections.size()]
+		await get_tree().process_frame
+		for i in range(group_start, group_end):
+			var callback: Callable = connections[i].get("callable", Callable())
+			var state := {"status": "running", "phase": "before", "index": i,
+				"count": connections.size(), "listener": _listener_description(callback)}
+			if not _write_listener_checkpoint(state):
+				await _mark("V ERROR", "Could not write probe checkpoint", 3600.0)
+				return false
+			print("[ANDROID_TITLE_READY_PROBE] BEFORE ", i + 1, "/", connections.size(), " ", state.listener)
+			if callback.is_valid():
+				callback.call()
+			state.phase = "after"
+			if not _write_listener_checkpoint(state):
+				await _mark("V ERROR", "Could not write returned checkpoint", 3600.0)
+				return false
+	if not _write_listener_checkpoint({"status": "complete", "count": connections.size()}):
+		await _mark("V ERROR", "Could not write completion checkpoint", 3600.0)
+		return false
+	await _mark("V99", "ALL %d LISTENERS RETURNED" % connections.size(), 1.5)
+	return true
+
+func _probe_global_update_theme() -> bool:
 	# Inline Global.update_theme() exactly so T01 can be narrowed to one operation.
 	await _mark("U01", "BEFORE theme_override reset")
 	Global.theme_override = ""
@@ -74,14 +125,17 @@ func _probe_global_update_theme() -> void:
 	await _mark("U04", "BEFORE ResourceSetterNew.clear_cache")
 	ResourceSetterNew.clear_cache()
 	await _mark("U05", "BEFORE level_theme_changed listeners")
-	await _probe_level_theme_listeners()
+	if not await _probe_level_theme_listeners():
+		return false
 	await _mark("U06", "Global.update_theme COMPLETE")
+	return true
 
-func _probe_update_theme() -> void:
+func _probe_update_theme() -> bool:
 	# Inline Level.update_theme() so the Android crash can be isolated to one
 	# exact operation. Each marker is rendered before the following statement.
 	await _mark("T01", "BEFORE Global.update_theme internals")
-	await _probe_global_update_theme()
+	if not await _probe_global_update_theme():
+		return false
 
 	await _mark("T02", "AFTER Global.update_theme")
 	if auto_set_theme:
@@ -124,6 +178,7 @@ func _probe_update_theme() -> void:
 		await _mark("T15", "BEFORE LevelBG.update_visuals")
 		$LevelBG.update_visuals()
 	await _mark("T16", "update_theme COMPLETE")
+	return true
 
 func _ready() -> void:
 	await _mark("R01", "BEFORE setup_stars")
@@ -171,7 +226,8 @@ func _ready() -> void:
 	await _mark("R21", "BEFORE world_id")
 	world_id = Global.world_num
 	await _mark("R22", "BEFORE update_theme probe")
-	await _probe_update_theme()
+	if not await _probe_update_theme():
+		return
 	await _mark("R23", "BEFORE physics_frame")
 	await get_tree().physics_frame
 	await _mark("R24", "BEFORE LevelBG time_of_day")

@@ -8,6 +8,11 @@ static var updating := false
 
 func _ready() -> void:
 	Global.get_node("GameHUD").hide()
+	# Restarting after a diagnostic crash must not re-extract an already
+	# verified ROM. Enter the same TitleScreen probe with existing assets.
+	if OS.has_feature("android") and Global.rom_assets_exist:
+		await _run_android_title_probe()
+		return
 	if updating: $MarginContainer/ProgressBar/Label.text = "UPDATING ASSETS..."
 	rom = FileAccess.get_file_as_bytes(Global.rom_path)
 	prg_rom_size = rom[4] * 16384
