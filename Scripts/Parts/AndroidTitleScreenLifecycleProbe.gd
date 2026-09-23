@@ -41,10 +41,13 @@ func _get_probe_overlay_label() -> Label:
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		# The project theme uses SMB sprite fonts that cannot render filesystem
-		# paths/method names. Force Godot's built-in fallback font so the saved
-		# callback details remain plain readable text on Android.
-		label.add_theme_font_override("font", ThemeDB.fallback_font)
+		# ThemeDB.fallback_font can still inherit the project's sprite-font
+		# fallback chain on Android. Use the platform's native sans-serif font
+		# directly so ASCII paths/method names render as normal text.
+		var diagnostic_font := SystemFont.new()
+		diagnostic_font.font_names = PackedStringArray(["sans-serif", "Roboto", "Arial"])
+		diagnostic_font.font_weight = 400
+		label.add_theme_font_override("font", diagnostic_font)
 		label.add_theme_font_size_override("font_size", 20)
 		label.add_theme_constant_override("outline_size", 0)
 		label.set_anchors_preset(Control.PRESET_TOP_WIDE)
