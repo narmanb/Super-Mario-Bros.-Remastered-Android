@@ -39,11 +39,25 @@ func _mark(code: String, description: String, seconds := 1.25) -> void:
 	await get_tree().process_frame
 	await get_tree().create_timer(seconds, false).timeout
 
+func _probe_global_update_theme() -> void:
+	# Inline Global.update_theme() exactly so T01 can be narrowed to one operation.
+	await _mark("U01", "BEFORE theme_override reset")
+	Global.theme_override = ""
+	await _mark("U02", "BEFORE time_override reset")
+	Global.time_override = ""
+	await _mark("U03", "BEFORE ThemeGetter.update_resource")
+	Global.get_node("ThemeGetter").update_resource()
+	await _mark("U04", "BEFORE ResourceSetterNew.clear_cache")
+	ResourceSetterNew.clear_cache()
+	await _mark("U05", "BEFORE level_theme_changed emit")
+	Global.level_theme_changed.emit()
+	await _mark("U06", "Global.update_theme COMPLETE")
+
 func _probe_update_theme() -> void:
 	# Inline Level.update_theme() so the Android crash can be isolated to one
 	# exact operation. Each marker is rendered before the following statement.
-	await _mark("T01", "BEFORE Global.update_theme")
-	Global.update_theme()
+	await _mark("T01", "BEFORE Global.update_theme internals")
+	await _probe_global_update_theme()
 
 	await _mark("T02", "AFTER Global.update_theme")
 	if auto_set_theme:
