@@ -33,7 +33,7 @@ func done() -> void:
 func _show_android_probe_stage(message: String, seconds := 2.5) -> void:
 	progress_bar.value = progress_bar.max_value
 	$MarginContainer/ProgressBar/Label.text = message
-	print("[ANDROID_TITLE_ROOT_PROBE] ", message)
+	print("[ANDROID_TITLE_READY_PROBE] ", message)
 	await get_tree().create_timer(seconds, false).timeout
 
 func _disable_scripts_recursive(node: Node, include_node := true) -> int:
@@ -45,71 +45,26 @@ func _disable_scripts_recursive(node: Node, include_node := true) -> int:
 		disabled += _disable_scripts_recursive(child, true)
 	return disabled
 
-func _free_probe_scene(node: Node) -> void:
-	node.queue_free()
-	await node.tree_exited
-	await get_tree().process_frame
+func _run_android_title_probe() -> void:
+	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
+	await _show_android_probe_stage("READY PROBE LOAD TITLE")
+	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
+	if packed == null:
+		$MarginContainer/ProgressBar/Label.text = "READY PROBE LOAD FAILED"
+		return
 
-func _make_root_lifecycle_probe(packed: PackedScene, mode: AndroidTitleScreenLifecycleProbe.ProbeMode) -> Node:
 	var instance := packed.instantiate()
 	for child in instance.get_children():
 		_disable_scripts_recursive(child, true)
-	AndroidTitleScreenLifecycleProbe.probe_mode = mode
 	instance.set_script(load("res://Scripts/Parts/AndroidTitleScreenLifecycleProbe.gd"))
-	# Keep this diagnostic focused on synchronous scene-tree entry callbacks.
-	# The normal TitleScreen _process() must not run between add_child and marker.
 	instance.set_process(false)
 	instance.set_physics_process(false)
-	return instance
 
-func _run_root_probe_phase(packed: PackedScene, phase: String, mode: AndroidTitleScreenLifecycleProbe.ProbeMode, description: String) -> void:
-	var instance := _make_root_lifecycle_probe(packed, mode)
-	await _show_android_probe_stage(phase + "1 " + description)
-	await _show_android_probe_stage(phase + "2 BEFORE ADD", 3.0)
+	await _show_android_probe_stage("READY PROBE BEFORE ADD", 2.5)
 	add_child(instance)
-	await _show_android_probe_stage(phase + "3 ADD RETURNED", 2.0)
-	await get_tree().process_frame
-	await _show_android_probe_stage(phase + "4 FRAME SURVIVED", 2.0)
-	await _free_probe_scene(instance)
-
-func _run_android_title_probe() -> void:
-	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
-
-	await _show_android_probe_stage("ROOT PROBE LOAD TITLE")
-	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
-	if packed == null:
-		$MarginContainer/ProgressBar/Label.text = "ROOT PROBE LOAD FAILED"
-		return
-
-	# D: TitleScreen-derived root with both parent lifecycle callback bodies
-	# suppressed. If D dies between D2 and D3, the failure happens before those
-	# bodies: inherited/script/onready initialization or another root-level hook.
-	await _run_root_probe_phase(
-		packed,
-		"D",
-		AndroidTitleScreenLifecycleProbe.ProbeMode.SKIP_BOTH,
-		"SKIP ENTER + READY"
-	)
-
-	# E: run only the real TitleScreen._enter_tree() body. _ready() is suppressed.
-	# A D pass followed by E2 -> crash identifies _enter_tree() as sufficient.
-	await _run_root_probe_phase(
-		packed,
-		"E",
-		AndroidTitleScreenLifecycleProbe.ProbeMode.ENTER_ONLY,
-		"REAL ENTER ONLY"
-	)
-
-	# F: suppress _enter_tree(), then run the real TitleScreen._ready() body.
-	# A D/E pass followed by F2 -> crash identifies _ready() as sufficient.
-	await _run_root_probe_phase(
-		packed,
-		"F",
-		AndroidTitleScreenLifecycleProbe.ProbeMode.READY_ONLY,
-		"REAL READY ONLY"
-	)
-
-	await _show_android_probe_stage("ROOT PROBE ALL PHASES SURVIVED", 10.0)
+	# The probe root owns all subsequent R01..R26 markers. Do not overwrite
+	# its label while its async _ready() advances one original operation at a time.
+	await get_tree().create_timer(120.0, false).timeout
 
 func generate_resource_pack() -> void:
 	DirAccess.make_dir_recursive_absolute(Global.ROM_ASSETS_PATH)
