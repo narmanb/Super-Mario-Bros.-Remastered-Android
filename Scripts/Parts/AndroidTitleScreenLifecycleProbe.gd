@@ -17,6 +17,22 @@ func _get_probe_overlay_label() -> Label:
 		layer.layer = 10000
 		root.add_child(layer)
 
+	# The corrupted TitleScreen can be visually noisy. Put the diagnostic on
+	# a fully opaque panel so a saved callback path/method is readable after
+	# relaunch without executing the crashing listener again.
+	var panel := layer.get_node_or_null("OpaqueBackground") as ColorRect
+	if panel == null:
+		panel = ColorRect.new()
+		panel.name = "OpaqueBackground"
+		panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		panel.color = Color(0.0, 0.0, 0.0, 1.0)
+		panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		panel.offset_left = 0
+		panel.offset_top = 24
+		panel.offset_right = 0
+		panel.offset_bottom = 330
+		layer.add_child(panel)
+
 	var label := layer.get_node_or_null("Marker") as Label
 	if label == null:
 		label = Label.new()
@@ -28,10 +44,10 @@ func _get_probe_overlay_label() -> Label:
 		label.add_theme_font_size_override("font_size", 26)
 		label.add_theme_constant_override("outline_size", 8)
 		label.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		label.offset_left = 0
-		label.offset_top = 72
-		label.offset_right = 0
-		label.offset_bottom = 250
+		label.offset_left = 24
+		label.offset_top = 40
+		label.offset_right = -24
+		label.offset_bottom = 314
 		layer.add_child(label)
 	return label
 
