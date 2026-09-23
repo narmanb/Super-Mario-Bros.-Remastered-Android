@@ -5,12 +5,38 @@ func _enter_tree() -> void:
 	# Match Run 31's failing F phase: suppress TitleScreen._enter_tree().
 	return
 
+func _get_probe_overlay_label() -> Label:
+	var root := get_tree().root
+	var layer := root.get_node_or_null("AndroidReadyProbeOverlay") as CanvasLayer
+	if layer == null:
+		layer = CanvasLayer.new()
+		layer.name = "AndroidReadyProbeOverlay"
+		layer.layer = 10000
+		root.add_child(layer)
+
+	var label := layer.get_node_or_null("Marker") as Label
+	if label == null:
+		label = Label.new()
+		label.name = "Marker"
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", 26)
+		label.add_theme_constant_override("outline_size", 8)
+		label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		label.offset_left = 0
+		label.offset_top = 72
+		label.offset_right = 0
+		label.offset_bottom = 132
+		layer.add_child(label)
+	return label
+
 func _mark(code: String, description: String, seconds := 1.25) -> void:
-	var generator := get_parent()
-	var label := generator.get_node_or_null("MarginContainer/ProgressBar/Label") as Label
-	if label != null:
-		label.text = code + " " + description
+	var label := _get_probe_overlay_label()
+	label.text = code + "  " + description
 	print("[ANDROID_TITLE_READY_PROBE] ", code, " ", description)
+	# Allow the top-level overlay to render before executing the operation.
+	await get_tree().process_frame
 	await get_tree().create_timer(seconds, false).timeout
 
 func _ready() -> void:
