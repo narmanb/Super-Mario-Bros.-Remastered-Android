@@ -39,6 +39,54 @@ func _mark(code: String, description: String, seconds := 1.25) -> void:
 	await get_tree().process_frame
 	await get_tree().create_timer(seconds, false).timeout
 
+func _probe_update_theme() -> void:
+	# Inline Level.update_theme() so the Android crash can be isolated to one
+	# exact operation. Each marker is rendered before the following statement.
+	await _mark("T01", "BEFORE Global.update_theme")
+	Global.update_theme()
+
+	await _mark("T02", "AFTER Global.update_theme")
+	if auto_set_theme:
+		await _mark("T03", "BEFORE campaign validity check")
+		if Global.CAMPAIGNS.has(Global.current_campaign) == false and first_load:
+			Global.current_campaign = "SMB1"
+
+		await _mark("T04", "BEFORE custom campaign check")
+		if Global.in_custom_campaign() == false:
+			await _mark("T05", "BEFORE WORLD_THEMES lookup")
+			theme = WORLD_THEMES[Global.current_campaign][Global.world_num]
+
+			await _mark("T06", "BEFORE theme_time selection")
+			if Global.world_num > 4 and Global.world_num < 9:
+				theme_time = "Night"
+			else:
+				theme_time = "Day"
+			if Global.current_campaign == "SMBANN":
+				theme_time = "Night"
+		else:
+			await _mark("T07", "BEFORE custom theme lookup")
+			theme = Global.custom_campaign_jsons[Global.current_custom_campaign].world_themes[Global.world_num - 1][0]
+			theme_time = Global.custom_campaign_jsons[Global.current_custom_campaign].world_themes[Global.world_num - 1][1]
+
+		await _mark("T08", "BEFORE campaign assignment")
+		campaign = Global.current_campaign
+		await _mark("T09", "BEFORE ResourceSetterNew.clear_cache")
+		ResourceSetterNew.clear_cache()
+
+	await _mark("T10", "BEFORE Global.current_campaign assignment")
+	Global.current_campaign = campaign
+	await _mark("T11", "BEFORE Global.level_theme assignment")
+	Global.level_theme = theme
+	await _mark("T12", "BEFORE Global.theme_time assignment")
+	Global.theme_time = theme_time
+	await _mark("T13", "BEFORE TitleScreen.last_theme assignment")
+	TitleScreen.last_theme = theme
+	await _mark("T14", "BEFORE LevelBG lookup")
+	if get_node_or_null("LevelBG") != null:
+		await _mark("T15", "BEFORE LevelBG.update_visuals")
+		$LevelBG.update_visuals()
+	await _mark("T16", "update_theme COMPLETE")
+
 func _ready() -> void:
 	await _mark("R01", "BEFORE setup_stars")
 	setup_stars()
@@ -84,8 +132,8 @@ func _ready() -> void:
 	level_id = Global.level_num - 1
 	await _mark("R21", "BEFORE world_id")
 	world_id = Global.world_num
-	await _mark("R22", "BEFORE update_theme")
-	update_theme()
+	await _mark("R22", "BEFORE update_theme probe")
+	await _probe_update_theme()
 	await _mark("R23", "BEFORE physics_frame")
 	await get_tree().physics_frame
 	await _mark("R24", "BEFORE LevelBG time_of_day")
