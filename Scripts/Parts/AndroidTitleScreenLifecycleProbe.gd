@@ -38,11 +38,15 @@ func _get_probe_overlay_label() -> Label:
 		label = Label.new()
 		label.name = "Marker"
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.add_theme_font_size_override("font_size", 26)
-		label.add_theme_constant_override("outline_size", 8)
+		# The project theme uses SMB sprite fonts that cannot render filesystem
+		# paths/method names. Force Godot's built-in fallback font so the saved
+		# callback details remain plain readable text on Android.
+		label.add_theme_font_override("font", ThemeDB.fallback_font)
+		label.add_theme_font_size_override("font_size", 20)
+		label.add_theme_constant_override("outline_size", 0)
 		label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 		label.offset_left = 24
 		label.offset_top = 40
