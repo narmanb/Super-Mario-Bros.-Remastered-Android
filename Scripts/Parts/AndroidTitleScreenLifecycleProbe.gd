@@ -3,6 +3,7 @@ extends TitleScreen
 
 const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const LISTENER_GROUP_SIZE := 64
+const LISTENER_PROBE_VERSION := 2
 const BOO_RACE_SETTINGS_ICON_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/BooRacePause/SettingsMenu/PanelContainer/Control/Icon::update"
 const STORY_PAUSE_LANGUAGE_FLAG_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/StoryPause/SettingsMenu/PanelContainer/MarginContainer/VBoxContainer/Video/Language/HBoxContainer/Flag::update"
 
@@ -19,9 +20,6 @@ func _get_probe_overlay_label() -> Label:
 		layer.layer = 10000
 		root.add_child(layer)
 
-	# The corrupted TitleScreen can be visually noisy. Put the diagnostic on
-	# a fully opaque panel so a saved callback path/method is readable after
-	# relaunch without executing the crashing listener again.
 	var panel := layer.get_node_or_null("OpaqueBackground") as ColorRect
 	if panel == null:
 		panel = ColorRect.new()
@@ -94,17 +92,21 @@ func _probe_level_theme_listeners() -> bool:
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
 
-	# Old outer-listener checkpoints survive APK updates. Rearm only an exact
-	# outer callback result. Once the callback writes an INTERNAL/PACKTEXTURE/
-	# RESOURCE_GETTER marker, keep it so the next launch displays the precise
-	# operation that failed instead of running the callback again.
+	# Probe v2 adds an experiment for the StoryPause Language flag's RG14
+	# return boundary. Older checkpoints have no version, so rearm them once.
+	# Every new outer-listener checkpoint now carries a version; therefore a
+	# v2 crash is displayed on the following launch instead of being rearmed
+	# repeatedly.
 	if previous.get("status", "") == "running":
 		var saved_listener := str(previous.get("listener", ""))
-		if saved_listener == BOO_RACE_SETTINGS_ICON_LISTENER or saved_listener == STORY_PAUSE_LANGUAGE_FLAG_LISTENER:
-			print("[ANDROID_TITLE_READY_PROBE] Rearming detailed probe from stale outer checkpoint: ", saved_listener)
+		var saved_version := int(previous.get("probe_version", 0))
+		var exact_old_target := saved_listener == BOO_RACE_SETTINGS_ICON_LISTENER or saved_listener == STORY_PAUSE_LANGUAGE_FLAG_LISTENER
+		var old_story_rg14 := saved_listener.begins_with(STORY_PAUSE_LANGUAGE_FLAG_LISTENER) and saved_listener.contains("RESOURCE_GETTER: RG14 unchanged path / RETURN original")
+		if saved_version < LISTENER_PROBE_VERSION and (exact_old_target or old_story_rg14):
+			print("[ANDROID_TITLE_READY_PROBE] Rearming v2 detailed probe from old checkpoint: ", saved_listener)
 			previous = {}
-			if not _write_listener_checkpoint({"status": "rearmed_detailed_listener_probe"}):
-				await _mark("V ERROR", "Could not rearm detailed listener probe", 3600.0)
+			if not _write_listener_checkpoint({"status": "rearmed_probe_v2", "probe_version": LISTENER_PROBE_VERSION}):
+				await _mark("V ERROR", "Could not rearm listener probe v2", 3600.0)
 				return false
 
 	if previous.get("status", "") == "running":
@@ -129,7 +131,8 @@ func _probe_level_theme_listeners() -> bool:
 		for i in range(group_start, group_end):
 			var callback: Callable = connections[i].get("callable", Callable())
 			var state := {"status": "running", "phase": "before", "index": i,
-				"count": connections.size(), "listener": _listener_description(callback)}
+				"count": connections.size(), "listener": _listener_description(callback),
+				"probe_version": LISTENER_PROBE_VERSION}
 			if not _write_listener_checkpoint(state):
 				await _mark("V ERROR", "Could not write probe checkpoint", 3600.0)
 				return false
@@ -140,7 +143,7 @@ func _probe_level_theme_listeners() -> bool:
 			if not _write_listener_checkpoint(state):
 				await _mark("V ERROR", "Could not write returned checkpoint", 3600.0)
 				return false
-	if not _write_listener_checkpoint({"status": "complete", "count": connections.size()}):
+	if not _write_listener_checkpoint({"status": "complete", "count": connections.size(), "probe_version": LISTENER_PROBE_VERSION}):
 		await _mark("V ERROR", "Could not write completion checkpoint", 3600.0)
 		return false
 	await _mark("V99", "ALL %d LISTENERS RETURNED" % connections.size(), 1.5)
