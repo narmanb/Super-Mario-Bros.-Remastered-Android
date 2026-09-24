@@ -3,6 +3,7 @@ extends TitleScreen
 
 const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const LISTENER_GROUP_SIZE := 64
+const BOO_RACE_SETTINGS_ICON_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/BooRacePause/SettingsMenu/PanelContainer/Control/Icon::update"
 
 func _enter_tree() -> void:
 	# Match Run 31's failing F phase: suppress TitleScreen._enter_tree().
@@ -41,9 +42,6 @@ func _get_probe_overlay_label() -> Label:
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		# ThemeDB.fallback_font can still inherit the project's sprite-font
-		# fallback chain on Android. Use the platform's native sans-serif font
-		# directly so ASCII paths/method names render as normal text.
 		var diagnostic_font := SystemFont.new()
 		diagnostic_font.font_names = PackedStringArray(["sans-serif", "Roboto", "Arial"])
 		diagnostic_font.font_weight = 400
@@ -62,7 +60,6 @@ func _mark(code: String, description: String, seconds := 0.1) -> void:
 	var label := _get_probe_overlay_label()
 	label.text = code + "  " + description
 	print("[ANDROID_TITLE_READY_PROBE] ", code, " ", description)
-	# Allow the top-level overlay to render before executing the operation.
 	await get_tree().process_frame
 	await get_tree().create_timer(seconds, false).timeout
 
@@ -88,16 +85,28 @@ func _write_listener_checkpoint(state: Dictionary) -> bool:
 		push_error("Could not persist Android theme probe: " + str(FileAccess.get_open_error()))
 		return false
 	file.store_string(JSON.stringify(state))
-	file.flush() # This must reach storage before the potentially fatal call.
+	file.flush()
 	file.close()
 	return true
 
 func _probe_level_theme_listeners() -> bool:
-	# Keep the original connection order, but remove the per-listener render
-	# delay. A durable before/after checkpoint identifies a synchronous crash
-	# on the next launch, without logcat or another build.
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
+
+	# Build 41 introduced statement-level instrumentation inside the failing
+	# PackNinePatch.update(), but an older outer-listener checkpoint survives
+	# app updates. That stale checkpoint made the probe stop here before the
+	# newly instrumented callback could execute. Rearm exactly once when the
+	# saved result is the known target and has no INTERNAL marker yet.
+	if previous.get("status", "") == "running":
+		var saved_listener := str(previous.get("listener", ""))
+		if saved_listener == BOO_RACE_SETTINGS_ICON_LISTENER:
+			print("[ANDROID_TITLE_READY_PROBE] Rearming internal icon probe from stale outer checkpoint")
+			previous = {}
+			if not _write_listener_checkpoint({"status": "rearmed_internal_icon_probe"}):
+				await _mark("V ERROR", "Could not rearm internal icon probe", 3600.0)
+				return false
+
 	if previous.get("status", "") == "running":
 		var index := int(previous.get("index", -1))
 		var last := str(previous.get("listener", "<unknown>"))
@@ -111,10 +120,10 @@ func _probe_level_theme_listeners() -> bool:
 	if previous.get("status", "") == "complete":
 		await _mark("V DONE", "All %d listeners returned in previous run" % int(previous.get("count", 0)), 3600.0)
 		return false
+
 	await _mark("V00", "TESTING %d LISTENERS IN FAST GROUPS" % connections.size(), 0.8)
 	for group_start in range(0, connections.size(), LISTENER_GROUP_SIZE):
 		var group_end := mini(group_start + LISTENER_GROUP_SIZE, connections.size())
-		# One visible group marker; callbacks within it run with no timer.
 		_get_probe_overlay_label().text = "V %d-%d/%d  TESTING" % [group_start + 1, group_end, connections.size()]
 		await get_tree().process_frame
 		for i in range(group_start, group_end):
@@ -138,7 +147,6 @@ func _probe_level_theme_listeners() -> bool:
 	return true
 
 func _probe_global_update_theme() -> bool:
-	# Inline Global.update_theme() exactly so T01 can be narrowed to one operation.
 	await _mark("U01", "BEFORE theme_override reset")
 	Global.theme_override = ""
 	await _mark("U02", "BEFORE time_override reset")
@@ -154,8 +162,6 @@ func _probe_global_update_theme() -> bool:
 	return true
 
 func _probe_update_theme() -> bool:
-	# Inline Level.update_theme() so the Android crash can be isolated to one
-	# exact operation. Each marker is rendered before the following statement.
 	await _mark("T01", "BEFORE Global.update_theme internals")
 	if not await _probe_global_update_theme():
 		return false
@@ -241,7 +247,6 @@ func _ready() -> void:
 	await _mark("R18", "BEFORE get_world_count clamp")
 	Global.world_num = clamp(Global.world_num, 1, get_world_count())
 
-	# Inline update_title() so its individual operations are isolated too.
 	await _mark("R19", "BEFORE load/apply save")
 	SaveManager.apply_save(SaveManager.load_save(Global.current_campaign))
 	await _mark("R20", "BEFORE level_id")
