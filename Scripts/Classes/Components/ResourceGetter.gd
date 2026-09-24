@@ -8,16 +8,21 @@ static var cache := {}
 const ANDROID_LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const STORY_PAUSE_LANGUAGE_FLAG_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/StoryPause/SettingsMenu/PanelContainer/MarginContainer/VBoxContainer/Video/Language/HBoxContainer/Flag::update"
 
-func _probe_story_flag(step: String) -> void:
+func _story_flag_probe_active() -> bool:
 	if OS.get_name() != "Android" or not FileAccess.file_exists(ANDROID_LISTENER_PROBE_PATH):
+		return false
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(ANDROID_LISTENER_PROBE_PATH))
+	if parsed is not Dictionary:
+		return false
+	return str(parsed.get("listener", "")).begins_with(STORY_PAUSE_LANGUAGE_FLAG_LISTENER)
+
+func _probe_story_flag(step: String) -> void:
+	if not _story_flag_probe_active():
 		return
 	var parsed = JSON.parse_string(FileAccess.get_file_as_string(ANDROID_LISTENER_PROBE_PATH))
 	if parsed is not Dictionary:
 		return
 	var state: Dictionary = parsed
-	var saved_listener := str(state.get("listener", ""))
-	if not saved_listener.begins_with(STORY_PAUSE_LANGUAGE_FLAG_LISTENER):
-		return
 	state.status = "running"
 	state.phase = "before"
 	state.listener = STORY_PAUSE_LANGUAGE_FLAG_LISTENER + "\nRESOURCE_GETTER: " + step
@@ -64,7 +69,16 @@ func get_resource(resource: Resource, use_cache := true) -> Resource:
 
 	_probe_story_flag("RG13 BEFORE unchanged-path comparison")
 	if path == original_resource.resource_path:
-		_probe_story_flag("RG14 unchanged path / RETURN original")
+		_probe_story_flag("RG14 unchanged path / BEFORE return selection")
+		# Build 46 diagnostic experiment: for the isolated StoryPause flag only,
+		# return the Resource passed into this call rather than the copy retained
+		# in original_resource. Normally these should refer to the same Resource.
+		# If this crosses the return boundary cleanly, it isolates the retained
+		# member reference as part of the Android native-crash trigger.
+		if _story_flag_probe_active():
+			_probe_story_flag("RG14A Android experiment / RETURN current input")
+			return resource
+		_probe_story_flag("RG14B normal / RETURN original")
 		return original_resource
 
 	if original_resource is Texture:
