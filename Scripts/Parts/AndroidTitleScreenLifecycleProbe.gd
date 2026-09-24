@@ -3,12 +3,11 @@ extends TitleScreen
 
 const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const LISTENER_GROUP_SIZE := 64
-const LISTENER_PROBE_VERSION := 2
+const LISTENER_PROBE_VERSION := 3
 const BOO_RACE_SETTINGS_ICON_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/BooRacePause/SettingsMenu/PanelContainer/Control/Icon::update"
 const STORY_PAUSE_LANGUAGE_FLAG_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/StoryPause/SettingsMenu/PanelContainer/MarginContainer/VBoxContainer/Video/Language/HBoxContainer/Flag::update"
 
 func _enter_tree() -> void:
-	# Match Run 31's failing F phase: suppress TitleScreen._enter_tree().
 	return
 
 func _get_probe_overlay_label() -> Label:
@@ -92,21 +91,18 @@ func _probe_level_theme_listeners() -> bool:
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
 
-	# Probe v2 adds an experiment for the StoryPause Language flag's RG14
-	# return boundary. Older checkpoints have no version, so rearm them once.
-	# Every new outer-listener checkpoint now carries a version; therefore a
-	# v2 crash is displayed on the following launch instead of being rearmed
-	# repeatedly.
+	# Probe v3 tests the Android unchanged-resource fast path. Rearm any older
+	# checkpoint belonging to either isolated UI listener, including nested
+	# PACKTEXTURE/INTERNAL/RESOURCE_GETTER markers from the v1/v2 probes.
 	if previous.get("status", "") == "running":
 		var saved_listener := str(previous.get("listener", ""))
 		var saved_version := int(previous.get("probe_version", 0))
-		var exact_old_target := saved_listener == BOO_RACE_SETTINGS_ICON_LISTENER or saved_listener == STORY_PAUSE_LANGUAGE_FLAG_LISTENER
-		var old_story_rg14 := saved_listener.begins_with(STORY_PAUSE_LANGUAGE_FLAG_LISTENER) and saved_listener.contains("RESOURCE_GETTER: RG14 unchanged path / RETURN original")
-		if saved_version < LISTENER_PROBE_VERSION and (exact_old_target or old_story_rg14):
-			print("[ANDROID_TITLE_READY_PROBE] Rearming v2 detailed probe from old checkpoint: ", saved_listener)
+		var saved_target := saved_listener.begins_with(BOO_RACE_SETTINGS_ICON_LISTENER) or saved_listener.begins_with(STORY_PAUSE_LANGUAGE_FLAG_LISTENER)
+		if saved_version < LISTENER_PROBE_VERSION and saved_target:
+			print("[ANDROID_TITLE_READY_PROBE] Rearming v3 Android resource-return workaround probe from old checkpoint: ", saved_listener)
 			previous = {}
-			if not _write_listener_checkpoint({"status": "rearmed_probe_v2", "probe_version": LISTENER_PROBE_VERSION}):
-				await _mark("V ERROR", "Could not rearm listener probe v2", 3600.0)
+			if not _write_listener_checkpoint({"status": "rearmed_probe_v3", "probe_version": LISTENER_PROBE_VERSION}):
+				await _mark("V ERROR", "Could not rearm listener probe v3", 3600.0)
 				return false
 
 	if previous.get("status", "") == "running":

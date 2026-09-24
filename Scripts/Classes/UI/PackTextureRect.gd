@@ -30,6 +30,13 @@ func _write_android_update_checkpoint(step: String) -> void:
 	file.close()
 	print("[ANDROID_FLAG_UPDATE_PROBE] ", step)
 
+func _android_can_keep_current_texture(current_texture: Resource) -> bool:
+	if OS.get_name() != "Android" or current_texture == null or current_texture is AtlasTexture:
+		return false
+	if use_cache and ResourceGetter.cache.has(current_texture.resource_path):
+		return false
+	return resource_getter.get_resource_path(current_texture.resource_path) == current_texture.resource_path
+
 func _ready() -> void:
 	update()
 	Global.level_theme_changed.connect(update)
@@ -42,13 +49,19 @@ func update() -> void:
 	var current_texture = texture
 	if probe_target:
 		var current_desc := "<null>" if current_texture == null else current_texture.get_class() + " path=" + current_texture.resource_path
-		_write_android_update_checkpoint("PT03 AFTER reading texture / BEFORE ResourceGetter: " + current_desc)
+		_write_android_update_checkpoint("PT03 AFTER reading texture / BEFORE Android unchanged-resource check: " + current_desc)
+
+	# Android 4.6 has been dying while returning an unchanged Resource from
+	# ResourceGetter. If there is no cached replacement and path resolution says
+	# this exact texture is unchanged, get_resource() can only return the same
+	# Resource. Keep the existing property instead and avoid that return boundary.
+	if _android_can_keep_current_texture(current_texture):
+		if probe_target:
+			_write_android_update_checkpoint("PT03A Android unchanged resource / BYPASS ResourceGetter / update COMPLETE")
+		return
 
 	var resolved_texture = resource_getter.get_resource(current_texture, use_cache)
 	if probe_target:
-		# Deliberately checkpoint before inspecting/dereferencing the returned
-		# Resource. This distinguishes a crash during the function return/local
-		# assignment from a crash in the diagnostic/property access that follows.
 		_write_android_update_checkpoint("PT04A ResourceGetter CALL RETURNED")
 		_write_android_update_checkpoint("PT04B BEFORE returned-resource null test")
 		var resolved_is_null := resolved_texture == null
@@ -64,9 +77,6 @@ func update() -> void:
 			same_reference = resolved_id == current_id
 			_write_android_update_checkpoint("PT04F AFTER current get_instance_id id=" + str(current_id) + " same=" + str(same_reference))
 
-		# Reassigning the exact same Resource is a no-op. Skip it during this
-		# targeted probe so we can also determine whether the native crash is
-		# caused by redundant TextureRect texture assignment on Android.
 		if same_reference:
 			_write_android_update_checkpoint("PT04G SAME RESOURCE / SKIP redundant texture assignment / COMPLETE")
 			return

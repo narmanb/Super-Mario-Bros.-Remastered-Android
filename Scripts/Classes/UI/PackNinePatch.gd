@@ -13,10 +13,6 @@ func _write_android_update_checkpoint(step: String) -> void:
 	if not _is_boo_race_settings_icon():
 		return
 
-	# Preserve the outer listener probe's index/count fields, but replace its
-	# saved listener description with the exact operation reached inside this
-	# PackNinePatch.update(). If Android dies synchronously, the next launch
-	# will display the last checkpoint that made it to storage.
 	var state: Dictionary = {}
 	if FileAccess.file_exists(ANDROID_LISTENER_PROBE_PATH):
 		var parsed = JSON.parse_string(FileAccess.get_file_as_string(ANDROID_LISTENER_PROBE_PATH))
@@ -33,6 +29,13 @@ func _write_android_update_checkpoint(step: String) -> void:
 	file.close()
 	print("[ANDROID_ICON_UPDATE_PROBE] ", step)
 
+func _android_can_keep_current_texture(current_texture: Resource) -> bool:
+	if OS.get_name() != "Android" or current_texture == null or current_texture is AtlasTexture:
+		return false
+	if ResourceGetter.cache.has(current_texture.resource_path):
+		return false
+	return resource_getter.get_resource_path(current_texture.resource_path) == current_texture.resource_path
+
 func _ready() -> void:
 	update()
 	Global.level_theme_changed.connect(update)
@@ -44,7 +47,13 @@ func update() -> void:
 		_write_android_update_checkpoint("02 BEFORE reading texture property")
 	var current_texture = texture
 	if probe_target:
-		_write_android_update_checkpoint("03 AFTER reading texture / BEFORE get_resource")
+		_write_android_update_checkpoint("03 AFTER reading texture / BEFORE Android unchanged-resource check")
+
+	if _android_can_keep_current_texture(current_texture):
+		if probe_target:
+			_write_android_update_checkpoint("03A Android unchanged resource / BYPASS ResourceGetter / update COMPLETE")
+		return
+
 	var resolved_texture = resource_getter.get_resource(current_texture)
 	if probe_target:
 		_write_android_update_checkpoint("04 AFTER get_resource / BEFORE texture assignment")
