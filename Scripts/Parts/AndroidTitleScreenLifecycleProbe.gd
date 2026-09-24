@@ -4,6 +4,7 @@ extends TitleScreen
 const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const LISTENER_GROUP_SIZE := 64
 const BOO_RACE_SETTINGS_ICON_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/BooRacePause/SettingsMenu/PanelContainer/Control/Icon::update"
+const STORY_PAUSE_LANGUAGE_FLAG_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/StoryPause/SettingsMenu/PanelContainer/MarginContainer/VBoxContainer/Video/Language/HBoxContainer/Flag::update"
 
 func _enter_tree() -> void:
 	# Match Run 31's failing F phase: suppress TitleScreen._enter_tree().
@@ -93,18 +94,17 @@ func _probe_level_theme_listeners() -> bool:
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
 
-	# Build 41 introduced statement-level instrumentation inside the failing
-	# PackNinePatch.update(), but an older outer-listener checkpoint survives
-	# app updates. That stale checkpoint made the probe stop here before the
-	# newly instrumented callback could execute. Rearm exactly once when the
-	# saved result is the known target and has no INTERNAL marker yet.
+	# Old outer-listener checkpoints survive APK updates. Rearm only an exact
+	# outer callback result. Once the callback writes an INTERNAL/PACKTEXTURE/
+	# RESOURCE_GETTER marker, keep it so the next launch displays the precise
+	# operation that failed instead of running the callback again.
 	if previous.get("status", "") == "running":
 		var saved_listener := str(previous.get("listener", ""))
-		if saved_listener == BOO_RACE_SETTINGS_ICON_LISTENER:
-			print("[ANDROID_TITLE_READY_PROBE] Rearming internal icon probe from stale outer checkpoint")
+		if saved_listener == BOO_RACE_SETTINGS_ICON_LISTENER or saved_listener == STORY_PAUSE_LANGUAGE_FLAG_LISTENER:
+			print("[ANDROID_TITLE_READY_PROBE] Rearming detailed probe from stale outer checkpoint: ", saved_listener)
 			previous = {}
-			if not _write_listener_checkpoint({"status": "rearmed_internal_icon_probe"}):
-				await _mark("V ERROR", "Could not rearm internal icon probe", 3600.0)
+			if not _write_listener_checkpoint({"status": "rearmed_detailed_listener_probe"}):
+				await _mark("V ERROR", "Could not rearm detailed listener probe", 3600.0)
 				return false
 
 	if previous.get("status", "") == "running":
