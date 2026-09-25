@@ -180,7 +180,11 @@ func _android_probe_mark(step: String) -> void:
 	print("[ANDROID_LEVEL_BG_PROBE] ", step)
 
 func update_visuals() -> void:
+	# Entry marker precedes even the tree guard, which previously could return
+	# without showing any BG checkpoint.
+	print("[ANDROID_LEVEL_BG_PROBE] BG00 ENTER update_visuals")
 	if is_inside_tree() == false:
+		print("[ANDROID_LEVEL_BG_PROBE] BG00 EXIT outside tree")
 		return
 	_android_probe_mark("BG01 ENTER update_visuals")
 	$PrimaryLayer.visible = primary_layer != 3

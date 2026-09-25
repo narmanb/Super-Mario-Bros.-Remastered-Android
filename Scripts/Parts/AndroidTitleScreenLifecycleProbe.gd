@@ -89,6 +89,12 @@ func _probe_level_theme_listeners() -> bool:
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
 
+	# A completed sweep is evidence that the listener path returned successfully.
+	# Keep that result across diagnostic versions and proceed to title startup.
+	if previous.get("status", "") == "complete":
+		print("[ANDROID_TITLE_READY_PROBE] Skipping completed listener sweep (", previous.get("count", 0), " listeners)")
+		return true
+
 	# Probe v6 adds LevelBG checkpoints and null-safe frame sizing. Rearm the
 	# previous listener result exactly once so startup reaches the new probe.
 	var previous_version := int(previous.get("probe_version", 0))
@@ -110,10 +116,6 @@ func _probe_level_theme_listeners() -> bool:
 		var verdict := "LAST STARTED" if phase == "before" else "LAST RETURNED"
 		await _mark("V FOUND", "%s %d/%d\n%s\nNow: %s" % [verdict, index + 1, int(previous.get("count", 0)), last, current], 3600.0)
 		return false
-	if previous.get("status", "") == "complete":
-		await _mark("V DONE", "All %d listeners returned in previous run" % int(previous.get("count", 0)), 3600.0)
-		return false
-
 	await _mark("V00", "TESTING %d LISTENERS IN FAST GROUPS" % connections.size(), 0.8)
 	for group_start in range(0, connections.size(), LISTENER_GROUP_SIZE):
 		var group_end := mini(group_start + LISTENER_GROUP_SIZE, connections.size())
@@ -197,9 +199,16 @@ func _probe_update_theme() -> bool:
 	await _mark("T13", "BEFORE TitleScreen.last_theme assignment")
 	TitleScreen.last_theme = theme
 	await _mark("T14", "BEFORE LevelBG lookup")
-	if get_node_or_null("LevelBG") != null:
+	var bg := get_node_or_null("LevelBG")
+	if bg != null:
 		await _mark("T15", "BEFORE LevelBG.update_visuals")
-		$LevelBG.update_visuals()
+		# Report call dispatch separately from execution inside LevelBG.
+		await _mark("T15A", "LevelBG in tree=%s, has update=%s" % [bg.is_inside_tree(), bg.has_method("update_visuals")], 0.8)
+		if not bg.is_inside_tree() or not bg.has_method("update_visuals"):
+			await _mark("T15 ERROR", "LevelBG is unavailable for update_visuals", 3600.0)
+			return false
+		bg.update_visuals()
+		print("[ANDROID_TITLE_READY_PROBE] LevelBG.update_visuals returned")
 	await _mark("T16", "update_theme COMPLETE")
 	return true
 
