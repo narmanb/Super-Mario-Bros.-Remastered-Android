@@ -103,65 +103,52 @@ func _enforce_full_window_coordinate_space() -> void:
 
 
 def patch_selectable_label() -> None:
-    """Require a fresh accept press after keyboard/controller focus changes.
-
-    SelectableLabel starts processing on the same frame it receives focus. On
-    Android, the synthetic input bridge can leave ui_accept's custom
-    just-pressed bookkeeping valid for that frame, so merely navigating onto a
-    label can emit pressed. Arm activation only after focus has survived a
-    process frame with ui_accept released. Mouse/touch _gui_input remains
-    unchanged and can still activate an option directly.
-    """
+    """Require a fresh accept press after a SelectableLabel receives focus."""
     path = ROOT / "Scripts" / "UI" / "SelectableLabel.gd"
-    text = path.read_text(encoding="utf-8")
+    # This is intentionally an Android-export replacement rather than a
+    # fragile textual edit. The scene itself owns focus-entered/focus-exited
+    # connections to toggle_process(); this script simply makes that method
+    # arm acceptance only after focus has settled and ui_accept is released.
+    replacement = '''extends Label
 
-    old = '''func _ready() -> void:
-\ttoggle_process(has_focus())
-\tfocus_entered.connect(toggle_process.bind(true))
-\tfocus_exited.connect(toggle_process.bind(false))
+signal pressed
 
-func _process(_delta: float) -> void:
-\tif Global.multibind_action_just_pressed("ui_accept"):
-\t\tpressed.emit()
-\telif Global.multibind_action_just_pressed("ui_back"):
-\t\tget_viewport().set_input_as_handled()
-'''
-    new = '''var accept_armed := false
+@export var accept_mouse_clicks := false
+
+var accept_armed := false
 var focus_frame := -1
 
 func _ready() -> void:
-\tif has_focus():
-\t\t_on_focus_entered()
-\telse:
-\t\ttoggle_process(false)
-\tfocus_entered.connect(_on_focus_entered)
-\tfocus_exited.connect(_on_focus_exited)
-
-func _on_focus_entered() -> void:
-\tfocus_frame = Engine.get_process_frames()
-\taccept_armed = false
-\ttoggle_process(true)
-
-func _on_focus_exited() -> void:
-\taccept_armed = false
-\ttoggle_process(false)
+\tif accept_mouse_clicks == false:
+\t\tmouse_filter = Control.MOUSE_FILTER_IGNORE
 
 func _process(_delta: float) -> void:
-\t# Do not allow the input frame that moved focus onto this label to also
-\t# activate it. A fresh accept press is required after focus settles.
+\t# Direct mouse/touch activation is independent of the controller debounce.
+\tif Input.is_action_just_pressed("mb_left") and accept_mouse_clicks:
+\t\tpressed.emit()
+\t\treturn
+
+\t# Do not let the same input frame that moved focus onto this label activate
+\t# it. Require focus to survive at least one process frame with ui_accept
+\t# released, then accept the next deliberate press.
 \tif not accept_armed:
 \t\tif Engine.get_process_frames() > focus_frame and not Input.is_action_pressed("ui_accept"):
 \t\t\taccept_armed = true
 \t\treturn
+
 \tif Global.multibind_action_just_pressed("ui_accept"):
 \t\taccept_armed = false
 \t\tpressed.emit()
-\telif Global.multibind_action_just_pressed("ui_back"):
-\t\tget_viewport().set_input_as_handled()
+
+func toggle_process(enabled := false) -> void:
+\tif enabled:
+\t\tfocus_frame = Engine.get_process_frames()
+\t\taccept_armed = false
+\telse:
+\t\taccept_armed = false
+\tset_process(enabled)
 '''
-    if old not in text:
-        raise RuntimeError("Could not locate SelectableLabel focus/input block")
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    path.write_text(replacement, encoding="utf-8")
     print("Applied Android SelectableLabel fresh-accept focus guard")
 
 
