@@ -4,7 +4,6 @@
 [ext_resource type="Script" uid="uid://26yissv8bnqw" path="res://Scripts/UI/WindowChanger.gd" id="2_uhh15"]
 [ext_resource type="Script" uid="uid://bdgvsycico544" path="res://Scripts/UI/AudioAdjuster.gd" id="3_mxpdm"]
 [ext_resource type="Script" uid="uid://hb401vacltfw" path="res://Scripts/Parts/VisualsSetter.gd" id="4_uhh15"]
-[ext_resource type="Script" path="res://Scripts/Parts/PhysicsDiagnostics.gd" id="5_diag"]
 
 [node name="Settings" type="Node" unique_id=164372316]
 script = ExtResource("1_4dj5d")
@@ -19,6 +18,3 @@ script = ExtResource("3_mxpdm")
 
 [node name="Visuals" type="Node" parent="Apply" unique_id=726632323]
 script = ExtResource("4_uhh15")
-
-[node name="PhysicsDiagnostics" type="Node" parent="."]
-script = ExtResource("5_diag")
