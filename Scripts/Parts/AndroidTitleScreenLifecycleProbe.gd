@@ -3,9 +3,7 @@ extends TitleScreen
 
 const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const LISTENER_GROUP_SIZE := 64
-const LISTENER_PROBE_VERSION := 3
-const BOO_RACE_SETTINGS_ICON_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/BooRacePause/SettingsMenu/PanelContainer/Control/Icon::update"
-const STORY_PAUSE_LANGUAGE_FLAG_LISTENER := "/root/Wrapper/CenterContainer/SubViewportContainer/SubViewport/Global/GameHUD/StoryPause/SettingsMenu/PanelContainer/MarginContainer/VBoxContainer/Video/Language/HBoxContainer/Flag::update"
+const LISTENER_PROBE_VERSION := 4
 
 func _enter_tree() -> void:
 	return
@@ -91,19 +89,17 @@ func _probe_level_theme_listeners() -> bool:
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
 
-	# Probe v3 tests the Android unchanged-resource fast path. Rearm any older
-	# checkpoint belonging to either isolated UI listener, including nested
-	# PACKTEXTURE/INTERNAL/RESOURCE_GETTER markers from the v1/v2 probes.
-	if previous.get("status", "") == "running":
-		var saved_listener := str(previous.get("listener", ""))
-		var saved_version := int(previous.get("probe_version", 0))
-		var saved_target := saved_listener.begins_with(BOO_RACE_SETTINGS_ICON_LISTENER) or saved_listener.begins_with(STORY_PAUSE_LANGUAGE_FLAG_LISTENER)
-		if saved_version < LISTENER_PROBE_VERSION and saved_target:
-			print("[ANDROID_TITLE_READY_PROBE] Rearming v3 Android resource-return workaround probe from old checkpoint: ", saved_listener)
-			previous = {}
-			if not _write_listener_checkpoint({"status": "rearmed_probe_v3", "probe_version": LISTENER_PROBE_VERSION}):
-				await _mark("V ERROR", "Could not rearm listener probe v3", 3600.0)
-				return false
+	# Probe v4 replaces PackTextureRect's Android Resource-return path with a
+	# direct texture apply and follows whichever PackTextureRect listener is
+	# currently being tested. Rearm any older saved result exactly once.
+	var previous_version := int(previous.get("probe_version", 0))
+	var previous_status := str(previous.get("status", ""))
+	if previous_version < LISTENER_PROBE_VERSION and previous_status in ["running", "complete"]:
+		print("[ANDROID_TITLE_READY_PROBE] Rearming v4 direct texture-apply probe from old checkpoint")
+		previous = {}
+		if not _write_listener_checkpoint({"status": "rearmed_probe_v4", "probe_version": LISTENER_PROBE_VERSION}):
+			await _mark("V ERROR", "Could not rearm listener probe v4", 3600.0)
+			return false
 
 	if previous.get("status", "") == "running":
 		var index := int(previous.get("index", -1))
