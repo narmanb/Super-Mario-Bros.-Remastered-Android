@@ -16,7 +16,7 @@ def patch_global_transition() -> None:
     path = ROOT / "Scripts" / "Classes" / "Singletons" / "Global.gd"
     text = path.read_text(encoding="utf-8")
     old = '\tif android_wrapper != null:\n\t\tawait android_wrapper.change_scene_to(scene_path)\n'
-    new = '\tif android_wrapper != null:\n\t\t# Match the older working Android wrapper: start the viewport scene\n\t\t# transition without awaiting the wrapper coroutine itself.\n\t\tandroid_wrapper.change_scene_to(scene_path)\n'
+    new = '\tif android_wrapper != null:\n\t\t# Android wrapper scene swaps are synchronous once requested. Do not\n\t\t# await a ready/tree_exited signal here; both can already have fired\n\t\t# by the time an await is registered and leave the transition stuck.\n\t\tandroid_wrapper.change_scene_to(scene_path)\n'
     if old not in text:
         raise RuntimeError("Could not find generated Android wrapper transition in Global.gd")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
@@ -25,12 +25,51 @@ def patch_global_transition() -> None:
 def patch_wrapper() -> None:
     path = ROOT / "Scripts" / "Wrapper.gd"
     text = path.read_text(encoding="utf-8")
-    expected = '    game_viewport.add_child(new_scene)\n    await new_scene.ready\n'
-    if expected not in text:
-        raise RuntimeError("Generated Android wrapper is missing the proven new-scene ready wait")
-    # Keep this wait. The pinned working Android fork waits for the newly added
-    # scene to become ready inside Wrapper.change_scene_to(). Global itself
-    # starts the wrapper transition without awaiting it, matching that fork.
+    old = '''func change_scene_to(scene) -> void:
+    for child in game_viewport.get_children():
+        if child == Global:
+            continue
+        child.queue_free()
+        await child.tree_exited
+    var packed_scene: PackedScene = null
+    if scene is String:
+        packed_scene = load(scene)
+    elif scene is PackedScene:
+        packed_scene = scene
+    if packed_scene == null:
+        push_error("Android Wrapper could not load scene: " + str(scene))
+        return
+    var new_scene := packed_scene.instantiate()
+    game_viewport.add_child(new_scene)
+    await new_scene.ready
+'''
+    new = '''func change_scene_to(scene) -> void:
+    # Do not await tree_exited/ready here. The old scene can be detached
+    # immediately, and add_child() enters/readies the replacement scene during
+    # the call. Awaiting either signal after the operation can miss the one-shot
+    # signal and permanently strand Android on the previous screen.
+    for child in game_viewport.get_children():
+        if child == Global:
+            continue
+        game_viewport.remove_child(child)
+        child.queue_free()
+    var packed_scene: PackedScene = null
+    if scene is String:
+        packed_scene = load(scene)
+    elif scene is PackedScene:
+        packed_scene = scene
+    if packed_scene == null:
+        push_error("Android Wrapper could not load scene: " + str(scene))
+        return
+    var new_scene := packed_scene.instantiate()
+    if new_scene == null:
+        push_error("Android Wrapper could not instantiate scene: " + str(scene))
+        return
+    game_viewport.add_child(new_scene)
+'''
+    if old not in text:
+        raise RuntimeError("Could not locate generated Android Wrapper.change_scene_to()")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
 def patch_touch_positions() -> None:
