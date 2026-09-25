@@ -33,7 +33,8 @@ func _position_touch_controls() -> void:
     var screen_to_canvas := root.get_screen_transform().affine_inverse()
     var top_left := screen_to_canvas * Vector2.ZERO
     var bottom_right := screen_to_canvas * Vector2(DisplayServer.window_get_size())
-    $Control.position = Vector2(top_left.x - 10.0, bottom_right.y - 141.0)
+    # Leave room for the left button; -10 clipped it on the S25+.
+    $Control.position = Vector2(top_left.x + 8.0, bottom_right.y - 141.0)
     $Control2.position = Vector2(bottom_right.x - 105.0, bottom_right.y - 141.0)
 '''
     if ready_marker not in text:
@@ -179,6 +180,68 @@ func toggle_process(enabled := false) -> void:
     print("Applied Android SelectableLabel fresh-accept focus guard")
 
 
+def patch_custom_level_container() -> None:
+    """A D-pad touch must not click the newly focused level row."""
+    path = ROOT / "Scripts" / "UI" / "CustomLevelContainer.gd"
+    text = path.read_text(encoding="utf-8")
+    old = '''func _process(_delta: float) -> void:
+\tif (Global.multibind_action_just_pressed("ui_accept") || Input.is_action_just_pressed("mb_left")) and visible:
+\t\tselected.emit(self)
+'''
+    new = '''func _process(_delta: float) -> void:
+\tif Global.multibind_action_just_pressed("ui_accept") and visible:
+\t\tselected.emit(self)
+
+func _gui_input(event: InputEvent) -> void:
+\t# Mouse clicks are local to this row. A touch on the D-pad can also create
+\t# mb_left, but it must never activate the row that just received focus.
+\tif visible and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+\t\tselected.emit(self)
+\t\taccept_event()
+'''
+    if text.count(old) != 1:
+        raise RuntimeError("Could not locate CustomLevelContainer selection polling")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def install_paused_controller_bridge() -> None:
+    """Stamp physical controller input while Global is paused with the game."""
+    path = ROOT / "Scripts" / "Classes" / "Singletons" / "AndroidPauseInputBridge.gd"
+    path.write_text('''extends Node
+
+func _ready() -> void:
+\tprocess_mode = Node.PROCESS_MODE_ALWAYS
+
+func _process(_delta: float) -> void:
+\tif get_tree().paused:
+\t\t# Global._process() normally releases its multibind axis latch.
+\t\tGlobal.handle_input()
+
+func _input(event: InputEvent) -> void:
+\tif not get_tree().paused or not event.is_action_type() or not event.is_pressed():
+\t\treturn
+\t# OnScreenControls already stamps InputEventAction presses, including while
+\t# paused. Only physical controller input needs this bridge.
+\tif not (event is InputEventJoypadButton or event is InputEventJoypadMotion):
+\t\treturn
+\tfor action in InputMap.get_actions():
+\t\tif event.is_action_pressed(action):
+\t\t\tif event is InputEventJoypadMotion and not Global.unpressed_buttons.get(action, true):
+\t\t\t\tcontinue
+\t\t\tGlobal.unpressed_buttons[action] = false
+\t\t\tGlobal.process_multibind_pressed_buttons[action] = Engine.get_process_frames()
+\t\t\tGlobal.physics_multibind_pressed_buttons[action] = Engine.get_physics_frames() + 1
+''', encoding="utf-8")
+
+    project_path = ROOT / "project.godot"
+    project = project_path.read_text(encoding="utf-8")
+    marker = '\n[debug]\n'
+    autoload = 'AndroidPauseInputBridge="*res://Scripts/Classes/Singletons/AndroidPauseInputBridge.gd"'
+    if project.count(marker) != 1 or autoload in project:
+        raise RuntimeError("Could not register Android pause input bridge")
+    project_path.write_text(project.replace(marker, f'\n{autoload}\n{marker}', 1), encoding="utf-8")
+
+
 def patch_level_resolution() -> None:
     """The Android Wrapper controls game width; levels must not scale the root."""
     path = ROOT / "Scripts" / "Classes" / "LevelClass.gd"
@@ -196,6 +259,8 @@ def main() -> None:
     patch_touch_script()
     patch_touch_scene_layout()
     patch_selectable_label()
+    patch_custom_level_container()
+    install_paused_controller_bridge()
     patch_level_resolution()
 
 
