@@ -113,7 +113,7 @@ func update() -> void:
 		_write_android_update_checkpoint("P02 BEFORE reading texture property")
 	var current_texture = texture
 	if probe_target:
-		var current_desc := "<null>" if current_texture == null else current_texture.get_class() + " path=" + current_texture.resource_path
+		var current_desc: String = "<null>" if current_texture == null else str(current_texture.get_class()) + " path=" + str(current_texture.resource_path)
 		_write_android_update_checkpoint("P03 AFTER reading texture: " + current_desc)
 
 	if OS.get_name() == "Android":

@@ -202,13 +202,21 @@ func _probe_update_theme() -> bool:
 	var bg := get_node_or_null("LevelBG")
 	if bg != null:
 		await _mark("T15", "BEFORE LevelBG.update_visuals")
-		# Report call dispatch separately from execution inside LevelBG.
+		# A title scene can instantiate even when Godot fails to bind its script.
+		# Retry the explicit script path before continuing without background updates.
 		await _mark("T15A", "LevelBG in tree=%s, has update=%s" % [bg.is_inside_tree(), bg.has_method("update_visuals")], 0.8)
-		if not bg.is_inside_tree() or not bg.has_method("update_visuals"):
-			await _mark("T15 ERROR", "LevelBG is unavailable for update_visuals", 3600.0)
-			return false
-		bg.update_visuals()
-		print("[ANDROID_TITLE_READY_PROBE] LevelBG.update_visuals returned")
+		if bg.is_inside_tree() and not bg.has_method("update_visuals"):
+			await _mark("T15B", "Reattaching LevelBGNew.gd", 0.2)
+			var bg_script: Script = load("res://Scripts/Classes/LevelBGNew.gd") as Script
+			if bg_script != null and bg_script.can_instantiate():
+				bg.set_script(bg_script)
+			await _mark("T15C", "Script load=%s, update=%s" % [bg_script != null, bg.has_method("update_visuals")], 0.8)
+		if bg.is_inside_tree() and bg.has_method("update_visuals"):
+			bg.update_visuals()
+			print("[ANDROID_TITLE_READY_PROBE] LevelBG.update_visuals returned")
+		else:
+			push_error("[ANDROID_TITLE_READY_PROBE] LevelBG unavailable: in_tree=%s has_method=%s" % [bg.is_inside_tree(), bg.has_method("update_visuals")])
+			await _mark("T15 WARN", "Background script unavailable; continuing title startup", 1.5)
 	await _mark("T16", "update_theme COMPLETE")
 	return true
 
@@ -262,7 +270,14 @@ func _ready() -> void:
 	await _mark("R23", "BEFORE physics_frame")
 	await get_tree().physics_frame
 	await _mark("R24", "BEFORE LevelBG time_of_day")
-	$LevelBG.time_of_day = ["Day", "Night"].find(Global.theme_time)
-	await _mark("R25", "BEFORE LevelBG update_visuals")
-	$LevelBG.update_visuals()
-	await _mark("R26", "READY COMPLETE", 10.0)
+	var bg := get_node_or_null("LevelBG")
+	if bg != null and bg.is_inside_tree() and bg.has_method("update_visuals"):
+		bg.time_of_day = ["Day", "Night"].find(Global.theme_time)
+		await _mark("R25", "BEFORE LevelBG update_visuals")
+		bg.update_visuals()
+	else:
+		await _mark("R25 SKIP", "LevelBG script still missing; title can continue", 1.5)
+	await _mark("R26", "READY COMPLETE", 3.0)
+	var overlay := get_tree().root.get_node_or_null("AndroidReadyProbeOverlay")
+	if overlay != null:
+		overlay.queue_free()
