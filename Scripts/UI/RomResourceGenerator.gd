@@ -8,10 +8,11 @@ static var updating := false
 
 func _ready() -> void:
 	Global.get_node("GameHUD").hide()
-	# Restarting after a diagnostic crash must not re-extract an already
-	# verified ROM. Enter the same TitleScreen probe with existing assets.
+	# If a verified ROM has already been extracted, go straight to the real
+	# title scene. Previous Android diagnostics instantiated TitleScreen with
+	# its child scripts stripped, which made the rendered scene non-playable.
 	if OS.has_feature("android") and Global.rom_assets_exist:
-		await _run_android_title_probe()
+		_enter_android_title_screen()
 		return
 	if updating: $MarginContainer/ProgressBar/Label.text = "UPDATING ASSETS..."
 	rom = FileAccess.get_file_as_bytes(Global.rom_path)
@@ -29,47 +30,26 @@ func done() -> void:
 
 	if OS.has_feature("android"):
 		Global.rom_assets_exist = true
-		await _run_android_title_probe()
+		_enter_android_title_screen()
 		return
 
 	await get_tree().create_timer(0.5).timeout
 	Global.transition_to_scene("res://Scenes/Levels/TitleScreen.tscn")
 
-func _show_android_probe_stage(message: String, seconds := 2.5) -> void:
-	progress_bar.value = progress_bar.max_value
-	$MarginContainer/ProgressBar/Label.text = message
-	print("[ANDROID_TITLE_READY_PROBE] ", message)
-	await get_tree().create_timer(seconds, false).timeout
-
-func _disable_scripts_recursive(node: Node, include_node := true) -> int:
-	var disabled := 0
-	if include_node and node.get_script() != null:
-		node.set_script(null)
-		disabled += 1
-	for child in node.get_children():
-		disabled += _disable_scripts_recursive(child, true)
-	return disabled
-
-func _run_android_title_probe() -> void:
+func _enter_android_title_screen() -> void:
 	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
-	await _show_android_probe_stage("READY PROBE LOAD TITLE")
+	print("[ANDROID_TITLE] Loading intact TitleScreen scene")
 	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
 	if packed == null:
-		$MarginContainer/ProgressBar/Label.text = "READY PROBE LOAD FAILED"
+		$MarginContainer/ProgressBar/Label.text = "TITLE LOAD FAILED"
+		push_error("[ANDROID_TITLE] Could not load " + TITLE_PATH)
 		return
-
-	var instance := packed.instantiate()
-	for child in instance.get_children():
-		_disable_scripts_recursive(child, true)
-	instance.set_script(load("res://Scripts/Parts/AndroidTitleScreenLifecycleProbe.gd"))
-	instance.set_process(false)
-	instance.set_physics_process(false)
-
-	await _show_android_probe_stage("READY PROBE BEFORE ADD", 2.5)
-	add_child(instance)
-	# The probe root owns all subsequent R01..R26 markers. Do not overwrite
-	# its label while its async _ready() advances one original operation at a time.
-	await get_tree().create_timer(120.0, false).timeout
+	$MarginContainer/ProgressBar/Label.text = "STARTING TITLE..."
+	# Route through Global so the generated Android runtime uses Wrapper.gd's
+	# SubViewport transition. Passing the PackedScene keeps every original
+	# script and lifecycle callback attached; do not instantiate a diagnostic
+	# replacement root here.
+	Global.transition_to_scene(packed)
 
 func generate_resource_pack() -> void:
 	DirAccess.make_dir_recursive_absolute(Global.ROM_ASSETS_PATH)
@@ -137,7 +117,6 @@ func paste_sprite(sprite_image: Image, json_dict: Dictionary):
 	for palette_name in palette_lists.keys():
 		var cur_column: int = 0
 		var offset := Vector2.ZERO
-
 		var pal_json: String = FileAccess.get_file_as_string(
 			PALETTES_FOLDER % [DEFAULT_PALETTE_GROUP, palette_name])
 		var pal_dict: Dictionary = JSON.parse_string(pal_json).palettes
