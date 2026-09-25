@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Final Android touch-overlay fixes applied after runtime generation.
+"""Final Android touch-overlay and menu-input fixes applied after runtime generation.
 
 The Android touch scene is generated from the older working port by
 fix_mobile_runtime.py. Keep the overlay on the root Window rather than the
 game SubViewport, preserve a full-landscape root coordinate space even when
-levels change display settings, and mirror pressed actions into SMB1R 1.1's
+levels change display settings, mirror pressed actions into SMB1R 1.1's
 custom just-pressed bookkeeping so pause menus continue to receive touch input
-while the SceneTree is paused.
+while the SceneTree is paused, and prevent a focus-navigation event from being
+mistaken for activation by a newly focused SelectableLabel.
 """
 
 from pathlib import Path
@@ -101,8 +102,72 @@ func _enforce_full_window_coordinate_space() -> void:
     print("Applied Android touch overlay full-window and paused-input fixes")
 
 
+def patch_selectable_label() -> None:
+    """Require a fresh accept press after keyboard/controller focus changes.
+
+    SelectableLabel starts processing on the same frame it receives focus. On
+    Android, the synthetic input bridge can leave ui_accept's custom
+    just-pressed bookkeeping valid for that frame, so merely navigating onto a
+    label can emit pressed. Arm activation only after focus has survived a
+    process frame with ui_accept released. Mouse/touch _gui_input remains
+    unchanged and can still activate an option directly.
+    """
+    path = ROOT / "Scripts" / "UI" / "SelectableLabel.gd"
+    text = path.read_text(encoding="utf-8")
+
+    old = '''func _ready() -> void:
+\ttoggle_process(has_focus())
+\tfocus_entered.connect(toggle_process.bind(true))
+\tfocus_exited.connect(toggle_process.bind(false))
+
+func _process(_delta: float) -> void:
+\tif Global.multibind_action_just_pressed("ui_accept"):
+\t\tpressed.emit()
+\telif Global.multibind_action_just_pressed("ui_back"):
+\t\tget_viewport().set_input_as_handled()
+'''
+    new = '''var accept_armed := false
+var focus_frame := -1
+
+func _ready() -> void:
+\tif has_focus():
+\t\t_on_focus_entered()
+\telse:
+\t\ttoggle_process(false)
+\tfocus_entered.connect(_on_focus_entered)
+\tfocus_exited.connect(_on_focus_exited)
+
+func _on_focus_entered() -> void:
+\tfocus_frame = Engine.get_process_frames()
+\taccept_armed = false
+\ttoggle_process(true)
+
+func _on_focus_exited() -> void:
+\taccept_armed = false
+\ttoggle_process(false)
+
+func _process(_delta: float) -> void:
+\t# Do not allow the input frame that moved focus onto this label to also
+\t# activate it. A fresh accept press is required after focus settles.
+\tif not accept_armed:
+\t\tif Engine.get_process_frames() > focus_frame and not Input.is_action_pressed("ui_accept"):
+\t\t\taccept_armed = true
+\t\treturn
+\tif Global.multibind_action_just_pressed("ui_accept"):
+\t\taccept_armed = false
+\t\tpressed.emit()
+\telif Global.multibind_action_just_pressed("ui_back"):
+\t\tget_viewport().set_input_as_handled()
+'''
+    if old not in text:
+        raise RuntimeError("Could not locate SelectableLabel focus/input block")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    print("Applied Android SelectableLabel fresh-accept focus guard")
+
+
 def main() -> None:
     patch_touch_script()
+    patch_selectable_label()
 
 
 if __name__ == "__main__":
