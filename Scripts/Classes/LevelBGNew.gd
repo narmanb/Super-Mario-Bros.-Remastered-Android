@@ -75,17 +75,11 @@ func set_value(value := 0, value_name := "") -> void:
 	set(value_name, value)
 
 var is_auto := false
-
 var combo_progress := 0.0
-
 var visual_progress := 0.0
-
 var can_tree_tint := true
-
 var top_edge_enabled := true
-
 var can_mushroom_tint := true
-
 var sky_scroll_speed := -4.0
 var cloud_scroll := [-12, 0]
 
@@ -124,8 +118,9 @@ func _physics_process(delta: float) -> void:
 		if Global.current_level != null:
 			var frame = $TopEdge/Sprite.sprite_frames.get_frame_texture($TopEdge/Sprite.animation, 0)
 			$TopEdge/Sprite.position.y = Global.current_level.vertical_height - 32
-			$TopEdge.repeat_size.x = frame.get_width()
-			$TopEdge.repeat_times = (ceil(get_viewport_rect().size.x / $TopEdge.repeat_size.x) + 1) * 2
+			if frame != null:
+				$TopEdge.repeat_size.x = frame.get_width()
+				$TopEdge.repeat_times = (ceil(get_viewport_rect().size.x / $TopEdge.repeat_size.x) + 1) * 2
 		var repeat_times = (ceil(get_viewport_rect().size.x / 512) + 1) * 2
 		for i in [$SkyLayer, $PrimaryLayer, $DiscoBits/Rainbow, $DiscoBits/SpotLights, $SecondaryLayer, $OverlayLayer/CloudLayer, $OverlayLayer/Particles, $LiquidLayer, $Parallax2D, $FGLayer]:
 			i.repeat_times = repeat_times
@@ -145,7 +140,7 @@ func handle_disco_visuals(delta: float) -> void:
 	if get_tree().get_first_node_in_group("Players") != null:
 		if get_tree().get_first_node_in_group("Players").is_invincible:
 			combo_progress = 1
-	visual_progress = (lerp(visual_progress, combo_progress, delta))
+	visual_progress = lerp(visual_progress, combo_progress, delta)
 	$DiscoBits.modulate.a = lerpf(0, 0.9, visual_progress)
 	$DiscoBits/Rainbow/Joint.position.y = lerpf(256, 0, visual_progress)
 	handle_toads(delta, visual_progress)
@@ -164,22 +159,30 @@ func handle_toads(delta: float, toad_combo_progress := 0.0) -> void:
 		if is_inside_tree() == false:
 			return
 		await get_tree().physics_frame
-	
 	idx = 0
 	for i in [$DiscoBits/Cheer1, $DiscoBits/Cheer2, $DiscoBits/Cheer3]:
 		if toad_combo_progress >= disco_sfx_threshold[idx]:
 			if i.is_playing() == false:
 				i.play()
-			i.stream_paused = (Global.game_paused)
+			i.stream_paused = Global.game_paused
 		else:
 			i.stop()
 		idx += 1
 
 var auto_layers := false
 
+func _android_probe_mark(step: String) -> void:
+	if OS.get_name() != "Android" or Engine.is_editor_hint() or not is_inside_tree():
+		return
+	var marker := get_tree().root.get_node_or_null("AndroidReadyProbeOverlay/Marker") as Label
+	if marker != null:
+		marker.text = "BG  " + step
+	print("[ANDROID_LEVEL_BG_PROBE] ", step)
+
 func update_visuals() -> void:
 	if is_inside_tree() == false:
 		return
+	_android_probe_mark("BG01 ENTER update_visuals")
 	$PrimaryLayer.visible = primary_layer != 3
 	$SecondaryLayer.scroll_scale.x = 0.4 if second_layer_order == 0 else 0.6
 	var parallax_amount = $SecondaryLayer.scroll_scale.x
@@ -195,6 +198,7 @@ func update_visuals() -> void:
 		if Settings.file.visuals.parallax_style == 0:
 			$FGLayer.scroll_scale.x = 1
 			$OverlayLayer/CloudLayer.scroll_scale.x = 1
+	_android_probe_mark("BG02 parallax settings complete")
 	$LiquidLayer.visible = liquid_layer > 0
 	$LiquidLayer/Lava.visible = liquid_layer == 2
 	$LiquidLayer/Water.visible = liquid_layer == 1
@@ -202,52 +206,61 @@ func update_visuals() -> void:
 	$LiquidLayer.scroll_offset.y = liquid_offset
 	$OverlayLayer/Particles/Snow.visible = particles == 1
 	$OverlayLayer/Particles/Leaves.visible = particles == 2
-	$OverlayLayer/Particles.visible = (Settings.file.visuals.bg_particles == 1 or Global.particle_override > 0)
+	$OverlayLayer/Particles.visible = Settings.file.visuals.bg_particles == 1 or Global.particle_override > 0
 	$OverlayLayer/Particles/LavaEmber.visible = particles == 3
 	$SkyLayer.autoscroll.x = sky_scroll_speed
 	$OverlayLayer/CloudLayer.autoscroll = Vector2(cloud_scroll[0], cloud_scroll[1])
 	$PrimaryLayer/Hills.visible = primary_layer == 0
 	$PrimaryLayer/Bush.visible = primary_layer == 1
-	
 	$SecondaryLayer.visible = second_layer > 0
 	$SecondaryLayer.scroll_offset = Vector2(80, 64)
 	if Engine.is_editor_hint() == false and get_viewport().get_camera_2d() != null:
 		for i in [$PrimaryLayer, $SecondaryLayer, $SkyLayer]:
-			i.screen_offset.x = get_viewport().get_camera_2d().get_screen_center_position().x / i.scroll_scale.x
+			if not is_zero_approx(i.scroll_scale.x):
+				i.screen_offset.x = get_viewport().get_camera_2d().get_screen_center_position().x / i.scroll_scale.x
 	$SecondaryLayer/Mushrooms.visible = second_layer == 1
 	$SecondaryLayer/Trees.visible = second_layer == 2
 	for i in $Parallax2D/Toads.get_children():
 		i.offset.y = randf_range(-5, 5)
 	$SecondaryLayer/Mushrooms.get_node("Tint").visible = can_mushroom_tint
 	$SecondaryLayer/Trees.get_node("Tint").visible = can_tree_tint
-	
-	if primary_layer != 3:
+	_android_probe_mark("BG03 basic layers complete")
+
+	if primary_layer >= 0 and primary_layer < 3:
 		var current_primary_layer: AnimatedSprite2D = [$PrimaryLayer/Hills, $PrimaryLayer/Bush, null][primary_layer]
 		if current_primary_layer != null:
 			var texture = current_primary_layer.sprite_frames.get_frame_texture(current_primary_layer.animation, current_primary_layer.frame)
 			if texture != null:
 				$PrimaryLayer.repeat_size = texture.get_size()
 			$PrimaryLayer.repeat_size.y = 0
+	_android_probe_mark("BG04 primary repeat sizing complete")
 
-	var current_secondary_layer: AnimatedSprite2D = [null, $SecondaryLayer/Trees, $SecondaryLayer/Mushrooms][second_layer]
-	if current_secondary_layer != null:
-		var texture = current_secondary_layer.sprite_frames.get_frame_texture(current_secondary_layer.animation, current_secondary_layer.frame)
-		if texture != null:
-			$SecondaryLayer.repeat_size = texture.get_size()
-		$SecondaryLayer.repeat_size.y = 0
-	
-	$SkyLayer.repeat_size = $SkyLayer/Sky.sprite_frames.get_frame_texture($SkyLayer/Sky.animation, $SkyLayer/Sky.frame).get_size()
-	
+	if second_layer >= 0 and second_layer < 3:
+		var current_secondary_layer: AnimatedSprite2D = [null, $SecondaryLayer/Trees, $SecondaryLayer/Mushrooms][second_layer]
+		if current_secondary_layer != null:
+			var texture = current_secondary_layer.sprite_frames.get_frame_texture(current_secondary_layer.animation, current_secondary_layer.frame)
+			if texture != null:
+				$SecondaryLayer.repeat_size = texture.get_size()
+			$SecondaryLayer.repeat_size.y = 0
+	_android_probe_mark("BG05 secondary repeat sizing complete / BEFORE sky")
+
+	var sky_texture: Texture2D = null
+	if $SkyLayer/Sky.sprite_frames != null:
+		sky_texture = $SkyLayer/Sky.sprite_frames.get_frame_texture($SkyLayer/Sky.animation, $SkyLayer/Sky.frame)
+	_android_probe_mark("BG06 sky texture null=" + str(sky_texture == null))
+	if sky_texture != null:
+		$SkyLayer.repeat_size = sky_texture.get_size()
+	_android_probe_mark("BG07 sky sizing complete")
+
 	var tree_tint_amount = inverse_lerp(1, 0, parallax_amount)
 	var mushroom_tint_amount = tree_tint_amount
 	if can_mushroom_tint == false:
 		mushroom_tint_amount = 0
 	if can_tree_tint == false:
 		tree_tint_amount = 0
-	
 	$SecondaryLayer/Mushrooms.get_node("Tint").modulate.a = mushroom_tint_amount
 	$SecondaryLayer/Trees.get_node("Tint").modulate.a = tree_tint_amount
-	
 	$PrimaryLayer.z_index = int(not bool(second_layer_order))
 	$OverlayLayer/CloudLayer.visible = overlay_clouds and (Settings.file.visuals.bg_particles == 1 or Global.overlay_clouds_override == 1)
 	$TopEdge.visible = ["Underground", "Castle", "GhostHouse", "Bonus"].has(Global.level_theme) and primary_layer == 0 and top_edge_enabled
+	_android_probe_mark("BG08 update_visuals COMPLETE")
