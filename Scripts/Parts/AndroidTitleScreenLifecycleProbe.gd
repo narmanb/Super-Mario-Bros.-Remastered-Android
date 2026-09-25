@@ -3,7 +3,7 @@ extends TitleScreen
 
 const LISTENER_PROBE_PATH := "user://android_theme_listener_probe.json"
 const LISTENER_GROUP_SIZE := 64
-const LISTENER_PROBE_VERSION := 4
+const LISTENER_PROBE_VERSION := 5
 
 func _enter_tree() -> void:
 	return
@@ -89,16 +89,16 @@ func _probe_level_theme_listeners() -> bool:
 	var connections := Global.get_signal_connection_list("level_theme_changed")
 	var previous := _read_listener_checkpoint()
 
-	# Probe v4 replaces PackTextureRect's Android Resource-return path with a
-	# direct texture apply and follows whichever PackTextureRect listener is
+	# Probe v5 replaces PackNinePatch's Android Resource-return path with a
+	# direct texture apply and follows whichever PackNinePatch listener is
 	# currently being tested. Rearm any older saved result exactly once.
 	var previous_version := int(previous.get("probe_version", 0))
 	var previous_status := str(previous.get("status", ""))
 	if previous_version < LISTENER_PROBE_VERSION and previous_status in ["running", "complete"]:
-		print("[ANDROID_TITLE_READY_PROBE] Rearming v4 direct texture-apply probe from old checkpoint")
+		print("[ANDROID_TITLE_READY_PROBE] Rearming v5 direct NinePatch texture-apply probe from old checkpoint")
 		previous = {}
-		if not _write_listener_checkpoint({"status": "rearmed_probe_v4", "probe_version": LISTENER_PROBE_VERSION}):
-			await _mark("V ERROR", "Could not rearm listener probe v4", 3600.0)
+		if not _write_listener_checkpoint({"status": "rearmed_probe_v5", "probe_version": LISTENER_PROBE_VERSION}):
+			await _mark("V ERROR", "Could not rearm listener probe v5", 3600.0)
 			return false
 
 	if previous.get("status", "") == "running":
