@@ -79,7 +79,7 @@ func _is_player_node(node: Node) -> bool:
 	if not is_instance_valid(node):
 		return false
 
-	# The live player is normally in the Players group.  Accept that first so
+	# The live player is normally in the Players group. Accept that first so
 	# this diagnostic does not depend on a particular runtime node name.
 	if node is CharacterBody2D and node.is_in_group("Players"):
 		return true
@@ -112,8 +112,8 @@ func _find_player():
 			cached_player = candidate
 			return cached_player
 
-	# Avoid doing the recursive fallbacks every rendered frame while sitting on
-	# the title screen.  As soon as a level begins, this retries four times/sec.
+	# Avoid doing recursive fallbacks every rendered frame on the title screen.
+	# As soon as a level begins, this retries four times per second.
 	if search_cooldown > 0.0:
 		return null
 	search_cooldown = 0.25
@@ -124,7 +124,7 @@ func _find_player():
 			cached_player = level_player
 			return cached_player
 
-	# Android gameplay can live below a wrapper/subviewport.  A root-tree scan
+	# Android gameplay can live below a wrapper/subviewport. A root-tree scan
 	# catches that layout without hard-coding the wrapper's node names.
 	var root_player = _find_player_recursive(get_tree().root)
 	if is_instance_valid(root_player):
@@ -157,7 +157,7 @@ func _update_text() -> void:
 		last_level_id = level_id
 		max_abs_x_speed = 0.0
 
-	# Keep runtime access dynamic here.  The concrete Player script owns
+	# Keep runtime access dynamic here. The concrete Player script owns
 	# physics_dict/physics_params, while CharacterBody2D owns velocity.
 	var velocity_value = player.get("velocity")
 	var current_abs_x := 0.0
@@ -168,12 +168,10 @@ func _update_text() -> void:
 	var setting_value := int(Settings.file.gameplay.physics_style)
 	var setting_name := "REMASTERED" if setting_value != 0 else "CLASSIC"
 	var active_name := "UNKNOWN"
-	var physics_dict = player.get("physics_dict")
-	var remastered_dict = player.get("PHYSICS_PARAMETERS")
-	var classic_dict = player.get("CLASSIC_PARAMETERS")
-	if physics_dict == remastered_dict:
+	var physics_dict = player.physics_dict
+	if physics_dict == player.PHYSICS_PARAMETERS:
 		active_name = "REMASTERED"
-	elif physics_dict == classic_dict:
+	elif physics_dict == player.CLASSIC_PARAMETERS:
 		active_name = "CLASSIC"
 
 	var run_speed := _physics_value(player, "RUN_SPEED")
