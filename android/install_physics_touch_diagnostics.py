@@ -4,6 +4,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Deliberately leave OnScreenControls.gd untouched; only add independent scene children.
 
 
 def main() -> None:
