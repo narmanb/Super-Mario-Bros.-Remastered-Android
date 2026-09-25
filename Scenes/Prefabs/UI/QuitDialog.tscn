@@ -67,6 +67,7 @@ _data = {
 }
 
 [node name="QuitDialog" type="Control" unique_id=272180054]
+modulate = Color(1, 1, 1, 0)
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
