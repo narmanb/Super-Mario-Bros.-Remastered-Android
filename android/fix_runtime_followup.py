@@ -2,8 +2,9 @@
 """Follow-up Android runtime fixes applied after fix_mobile_runtime.py.
 
 This keeps the 1.1 Android wrapper aligned with the older proven Android port,
-nudges the touch-control clusters outward, and strips the desktop/native
-FileDialog from the Android ROM-verification scene.
+nudges the touch-control clusters outward, strips the desktop/native FileDialog
+from the Android ROM-verification scene, and keeps expensive resource-pack
+initialization out of synchronous scene insertion.
 """
 
 import re
@@ -70,6 +71,133 @@ def patch_wrapper() -> None:
     if old not in text:
         raise RuntimeError("Could not locate generated Android Wrapper.change_scene_to()")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def patch_android_resource_initialization() -> None:
+    """Do not perform resource-pack disk/image work while add_child() enters TitleScreen.
+
+    The title diagnostic that rendered successfully stripped child scripts. The intact
+    scene hangs while its child lifecycle callbacks run synchronously during
+    SubViewport.add_child(). ResourceSetterNew, PackTextureRect, PackNinePatch and
+    PackButton all perform resource lookup/loading from _enter_tree()/_ready(). On
+    Android, queue those initial refreshes until a later frame so scene insertion and
+    the root title lifecycle can finish first. Theme-change callbacks use the same
+    lightweight queue path.
+    """
+
+    setter_path = ROOT / "Scripts" / "Classes" / "Components" / "ResourceSetterNew.gd"
+    setter = setter_path.read_text(encoding="utf-8")
+    setter_old = '''func _ready() -> void:
+\tif mode != ResourceMode.THEME:
+\t\tGlobal.level_theme_changed.connect(update_resource)
+
+func _enter_tree() -> void:
+\tsafety_check()
+\tif update_on_spawn:
+\t\tupdate_resource()
+'''
+    setter_new = '''var _android_update_queued := false
+
+func _ready() -> void:
+\tif mode != ResourceMode.THEME:
+\t\tif OS.has_feature("android"):
+\t\t\tGlobal.level_theme_changed.connect(_queue_android_update_resource)
+\t\telse:
+\t\t\tGlobal.level_theme_changed.connect(update_resource)
+
+func _enter_tree() -> void:
+\tsafety_check()
+\tif update_on_spawn:
+\t\tif OS.has_feature("android"):
+\t\t\t_queue_android_update_resource()
+\t\telse:
+\t\t\tupdate_resource()
+
+func _queue_android_update_resource() -> void:
+\tif _android_update_queued or not is_inside_tree():
+\t\treturn
+\t_android_update_queued = true
+\tcall_deferred("_run_android_update_resource")
+
+func _run_android_update_resource() -> void:
+\tawait get_tree().process_frame
+\t_android_update_queued = false
+\tif is_inside_tree() and not is_queued_for_deletion():
+\t\tupdate_resource()
+'''
+    if setter_old not in setter:
+        raise RuntimeError("Could not locate ResourceSetterNew startup lifecycle")
+    setter_path.write_text(setter.replace(setter_old, setter_new, 1), encoding="utf-8")
+
+    for relative in (
+        "Scripts/Classes/UI/PackTextureRect.gd",
+        "Scripts/Classes/UI/PackNinePatch.gd",
+    ):
+        path = ROOT / relative
+        text = path.read_text(encoding="utf-8")
+        old = '''func _ready() -> void:
+\tupdate()
+\tGlobal.level_theme_changed.connect(update)
+'''
+        new = '''var _android_update_queued := false
+
+func _ready() -> void:
+\tif OS.has_feature("android"):
+\t\tGlobal.level_theme_changed.connect(_queue_android_update)
+\t\t_queue_android_update()
+\t\treturn
+\tupdate()
+\tGlobal.level_theme_changed.connect(update)
+
+func _queue_android_update() -> void:
+\tif _android_update_queued or not is_inside_tree():
+\t\treturn
+\t_android_update_queued = true
+\tcall_deferred("_run_android_update")
+
+func _run_android_update() -> void:
+\tawait get_tree().process_frame
+\t_android_update_queued = false
+\tif is_inside_tree() and not is_queued_for_deletion():
+\t\tupdate()
+'''
+        if old not in text:
+            raise RuntimeError(f"Could not locate startup lifecycle in {relative}")
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    button_path = ROOT / "Scripts" / "Classes" / "UI" / "PackButton.gd"
+    button = button_path.read_text(encoding="utf-8")
+    button_old = '''func _ready() -> void:
+\tadd_child(resource_getter)
+\tupdate()
+\tGlobal.level_theme_changed.connect(update)
+'''
+    button_new = '''var _android_update_queued := false
+
+func _ready() -> void:
+\tadd_child(resource_getter)
+\tif OS.has_feature("android"):
+\t\tGlobal.level_theme_changed.connect(_queue_android_update)
+\t\t_queue_android_update()
+\t\treturn
+\tupdate()
+\tGlobal.level_theme_changed.connect(update)
+
+func _queue_android_update() -> void:
+\tif _android_update_queued or not is_inside_tree():
+\t\treturn
+\t_android_update_queued = true
+\tcall_deferred("_run_android_update")
+
+func _run_android_update() -> void:
+\tawait get_tree().process_frame
+\t_android_update_queued = false
+\tif is_inside_tree() and not is_queued_for_deletion():
+\t\tupdate()
+'''
+    if button_old not in button:
+        raise RuntimeError("Could not locate PackButton startup lifecycle")
+    button_path.write_text(button.replace(button_old, button_new, 1), encoding="utf-8")
 
 
 def patch_touch_positions() -> None:
@@ -178,9 +306,10 @@ def patch_rom_verifier() -> None:
 def main() -> None:
     patch_global_transition()
     patch_wrapper()
+    patch_android_resource_initialization()
     patch_touch_positions()
     patch_rom_verifier()
-    print("Applied Android wrapper, touch-position, and ROM-verifier fixes")
+    print("Applied Android wrapper, deferred-resource, touch-position, and ROM-verifier fixes")
 
 
 if __name__ == "__main__":
