@@ -2,28 +2,84 @@ extends Label
 
 var max_abs_x_speed := 0.0
 var last_level_id := 0
+var cached_player: Node = null
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_update_text()
+	_set_diagnostics_visible(false)
 
 func _process(_delta: float) -> void:
 	_update_text()
 
+func _set_diagnostics_visible(value: bool) -> void:
+	visible = value
+	var background := get_node_or_null("../PhysicsDiagnosticsBackground")
+	if background != null:
+		background.visible = value
+
+func _is_player_node(node: Node) -> bool:
+	if not is_instance_valid(node):
+		return false
+	var script = node.get_script()
+	if script == null:
+		return false
+	return String(script.resource_path).ends_with("/Scripts/Classes/Entities/Player.gd")
+
+func _find_player_recursive(node: Node):
+	if not is_instance_valid(node):
+		return null
+	if _is_player_node(node):
+		return node
+	for child in node.get_children():
+		var found = _find_player_recursive(child)
+		if is_instance_valid(found):
+			return found
+	return null
+
 func _find_player():
-	var player = get_tree().get_first_node_in_group("Players")
-	if is_instance_valid(player):
-		return player
+	if is_instance_valid(cached_player) and _is_player_node(cached_player):
+		return cached_player
+
+	# Fast path when the group survives the Android wrapper/subviewport setup.
+	for candidate in get_tree().get_nodes_in_group("Players"):
+		if _is_player_node(candidate):
+			cached_player = candidate
+			return cached_player
+
+	# Search the current level directly; this is the most reliable source once a
+	# level is running, regardless of the runtime player node name.
+	if is_instance_valid(Global.current_level):
+		var level_player = _find_player_recursive(Global.current_level)
+		if is_instance_valid(level_player):
+			cached_player = level_player
+			return cached_player
+
+	# Android keeps gameplay under this SubViewport. Scan it by script identity
+	# rather than assuming the player node is literally named "Player".
 	var viewport = get_tree().root.get_node_or_null("Wrapper/CenterContainer/SubViewportContainer/SubViewport")
 	if viewport != null:
-		player = viewport.find_child("Player", true, false)
-	return player
+		var viewport_player = _find_player_recursive(viewport)
+		if is_instance_valid(viewport_player):
+			cached_player = viewport_player
+			return cached_player
+
+	# Last-resort full-tree scan. This is only reached while no cached player is
+	# available, so it does not run every frame during normal gameplay.
+	var root_player = _find_player_recursive(get_tree().root)
+	if is_instance_valid(root_player):
+		cached_player = root_player
+		return cached_player
+
+	return null
 
 func _update_text() -> void:
 	var player = _find_player()
 	if not is_instance_valid(player):
-		text = "PHYSICS DIAGNOSTICS\nTOUCH LAYER OK\nWAITING FOR PLAYER..."
+		cached_player = null
+		_set_diagnostics_visible(false)
 		return
+
+	_set_diagnostics_visible(true)
 
 	var level_id := 0
 	if is_instance_valid(Global.current_level):
@@ -49,10 +105,12 @@ func _update_text() -> void:
 		active_name = "CLASSIC"
 
 	text = (
-		"PHYSICS DIAGNOSTICS\n"
-		+ "SETTING: %s (%d)   ACTIVE: %s\n" % [setting_name, setting_value, active_name]
-		+ "WALK MAX: %.2f   ACCEL: %.2f\n" % [float(player.physics_params("WALK_SPEED")), float(player.physics_params("GROUND_WALK_ACCEL"))]
-		+ "RUN MAX: %.2f   ACCEL: %.2f\n" % [float(player.physics_params("RUN_SPEED")), float(player.physics_params("GROUND_RUN_ACCEL"))]
-		+ "JUMP IDLE: %.2f   GRAV: %.2f\n" % [float(player.physics_params("JUMP_SPEED_IDLE")), float(player.physics_params("JUMP_GRAVITY_IDLE"))]
-		+ "CURRENT |X|: %.2f   MAX THIS LEVEL: %.2f" % [current_abs_x, max_abs_x_speed]
+		"PHYSICS\n"
+		+ "SET %s\n" % setting_name
+		+ "ACTIVE %s\n" % active_name
+		+ "RUN %.2f  A %.2f\n" % [float(player.physics_params("RUN_SPEED")), float(player.physics_params("GROUND_RUN_ACCEL"))]
+		+ "WALK %.2f  A %.2f\n" % [float(player.physics_params("WALK_SPEED")), float(player.physics_params("GROUND_WALK_ACCEL"))]
+		+ "JUMP %.2f  G %.2f\n" % [float(player.physics_params("JUMP_SPEED_IDLE")), float(player.physics_params("JUMP_GRAVITY_IDLE"))]
+		+ "X %.2f\n" % current_abs_x
+		+ "MAX %.2f" % max_abs_x_speed
 	)
