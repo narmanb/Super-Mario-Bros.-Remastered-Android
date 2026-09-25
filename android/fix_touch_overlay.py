@@ -3,9 +3,10 @@
 
 The Android touch scene is generated from the older working port by
 fix_mobile_runtime.py. Keep the overlay on the root Window rather than the
-256x240 game SubViewport, and mirror pressed actions into SMB1R 1.1's custom
-just-pressed bookkeeping so pause menus continue to receive touch input while
-the SceneTree is paused.
+game SubViewport, preserve a full-landscape root coordinate space even when
+levels change display settings, and mirror pressed actions into SMB1R 1.1's
+custom just-pressed bookkeeping so pause menus continue to receive touch input
+while the SceneTree is paused.
 """
 
 from pathlib import Path
@@ -23,19 +24,48 @@ def patch_touch_script() -> None:
 '''
     ready_replacement = '''func _enter_tree() -> void:
     # The controls are an Android-wide overlay, not part of the centered game
-    # SubViewport. Explicitly bind the CanvasLayer to the root Window so a
-    # level switching the game viewport back to 256x240 cannot pull the touch
-    # controls into the middle of the screen.
+    # SubViewport. Keep them attached to the root Window.
     process_mode = Node.PROCESS_MODE_ALWAYS
     custom_viewport = get_tree().root
+    _enforce_full_window_coordinate_space()
 
 func _ready() -> void:
     _ensure_ui_back_action()
+    _enforce_full_window_coordinate_space()
     _update_visibility()
+
+func _enforce_full_window_coordinate_space() -> void:
+    # SMB1R changes Window content scaling when a level/aspect ratio becomes
+    # active. That is correct on desktop but on Android it also makes this
+    # CanvasLayer inherit the centered game area's width, pulling both touch
+    # clusters into the middle of the phone. The actual game renders in its
+    # own SubViewport, so keep the root Window at the fixed 256x240 reference
+    # size with EXPAND; Godot then exposes the extra landscape width to these
+    # left/right anchored Controls while the Wrapper independently controls
+    # the game viewport width.
+    var root := get_tree().root
+    custom_viewport = root
+    if root.content_scale_size != Vector2i(256, 240):
+        root.content_scale_size = Vector2i(256, 240)
+    if root.content_scale_mode != Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
+        root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+    if root.content_scale_aspect != Window.CONTENT_SCALE_ASPECT_EXPAND:
+        root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
 '''
     if ready_marker not in text:
         raise RuntimeError("Could not locate OnScreenControls._ready()")
     text = text.replace(ready_marker, ready_replacement, 1)
+
+    process_old = '''func _process(_delta: float) -> void:
+    _update_visibility()
+'''
+    process_new = '''func _process(_delta: float) -> void:
+    _enforce_full_window_coordinate_space()
+    _update_visibility()
+'''
+    if process_old not in text:
+        raise RuntimeError("Could not locate OnScreenControls._process()")
+    text = text.replace(process_old, process_new, 1)
 
     emit_old = '''func _emit_action(action: StringName, pressed: bool) -> void:
     # 1.1's just-pressed tracker is populated from Global._input(), so use a
@@ -68,7 +98,7 @@ func _ready() -> void:
     text = text.replace(emit_old, emit_new, 1)
 
     path.write_text(text, encoding="utf-8")
-    print("Applied Android touch overlay viewport and paused-input fixes")
+    print("Applied Android touch overlay full-window and paused-input fixes")
 
 
 def main() -> None:
