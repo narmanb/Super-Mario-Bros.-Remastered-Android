@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Final Android touch-overlay and menu-input fixes applied after runtime generation.
-
-The Android touch scene is generated from the older working port by
-fix_mobile_runtime.py. Keep the overlay on the root Window rather than the
-game SubViewport, preserve a full-landscape root coordinate space even when
-levels change display settings, mirror pressed actions into SMB1R 1.1's
-custom just-pressed bookkeeping so pause menus continue to receive touch input
-while the SceneTree is paused, and prevent a focus-navigation event from being
-mistaken for activation by a newly focused SelectableLabel.
-"""
+"""Android touch layout and menu input fixes applied after runtime generation."""
 
 from pathlib import Path
 
@@ -28,30 +19,22 @@ def patch_touch_script() -> None:
     # SubViewport. Keep them attached to the root Window.
     process_mode = Node.PROCESS_MODE_ALWAYS
     custom_viewport = get_tree().root
-    _enforce_full_window_coordinate_space()
 
 func _ready() -> void:
     _ensure_ui_back_action()
-    _enforce_full_window_coordinate_space()
+    _position_touch_controls()
     _update_visibility()
 
-func _enforce_full_window_coordinate_space() -> void:
-    # SMB1R changes Window content scaling when a level/aspect ratio becomes
-    # active. That is correct on desktop but on Android it also makes this
-    # CanvasLayer inherit the centered game area's width, pulling both touch
-    # clusters into the middle of the phone. The actual game renders in its
-    # own SubViewport, so keep the root Window at the fixed 256x240 reference
-    # size with EXPAND; Godot then exposes the extra landscape width to these
-    # left/right anchored Controls while the Wrapper independently controls
-    # the game viewport width.
+func _position_touch_controls() -> void:
+    # Convert the actual window corners into root canvas coordinates. Both
+    # the sprites and TouchScreenButton hit shapes share these parent Controls.
     var root := get_tree().root
     custom_viewport = root
-    if root.content_scale_size != Vector2i(256, 240):
-        root.content_scale_size = Vector2i(256, 240)
-    if root.content_scale_mode != Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
-        root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
-    if root.content_scale_aspect != Window.CONTENT_SCALE_ASPECT_EXPAND:
-        root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+    var screen_to_canvas := root.get_screen_transform().affine_inverse()
+    var top_left := screen_to_canvas * Vector2.ZERO
+    var bottom_right := screen_to_canvas * Vector2(DisplayServer.window_get_size())
+    $Control.position = Vector2(top_left.x - 10.0, bottom_right.y - 141.0)
+    $Control2.position = Vector2(bottom_right.x - 105.0, bottom_right.y - 141.0)
 '''
     if ready_marker not in text:
         raise RuntimeError("Could not locate OnScreenControls._ready()")
@@ -61,7 +44,7 @@ func _enforce_full_window_coordinate_space() -> void:
     _update_visibility()
 '''
     process_new = '''func _process(_delta: float) -> void:
-    _enforce_full_window_coordinate_space()
+    _position_touch_controls()
     _update_visibility()
 '''
     if process_old not in text:
@@ -102,6 +85,48 @@ func _enforce_full_window_coordinate_space() -> void:
     print("Applied Android touch overlay full-window and paused-input fixes")
 
 
+def patch_touch_scene_layout() -> None:
+    """Replace the older port's logical-screen anchors with absolute parents."""
+    path = ROOT / "Scenes" / "Prefabs" / "UI" / "OnScreenControls.tscn"
+    scene = path.read_text(encoding="utf-8")
+    old_left = '''[node name="Control" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -10.0
+offset_top = -141.0
+offset_right = 131.0
+grow_vertical = 0
+'''
+    new_left = '''[node name="Control" type="Control" parent="."]
+layout_mode = 3
+offset_right = 141.0
+offset_bottom = 141.0
+'''
+    old_right = '''[node name="Control2" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -105.0
+offset_top = -141.0
+offset_right = 10.0
+grow_horizontal = 0
+grow_vertical = 0
+'''
+    new_right = '''[node name="Control2" type="Control" parent="."]
+layout_mode = 3
+offset_right = 115.0
+offset_bottom = 141.0
+'''
+    if scene.count(old_left) != 1 or scene.count(old_right) != 1:
+        raise RuntimeError("Could not locate generated touch-control anchors")
+    path.write_text(scene.replace(old_left, new_left, 1).replace(old_right, new_right, 1), encoding="utf-8")
+
+
 def patch_selectable_label() -> None:
     """Require a fresh accept press after a SelectableLabel receives focus."""
     path = ROOT / "Scripts" / "UI" / "SelectableLabel.gd"
@@ -122,12 +147,14 @@ func _ready() -> void:
 \tif accept_mouse_clicks == false:
 \t\tmouse_filter = Control.MOUSE_FILTER_IGNORE
 
-func _process(_delta: float) -> void:
-\t# Direct mouse/touch activation is independent of the controller debounce.
-\tif Input.is_action_just_pressed("mb_left") and accept_mouse_clicks:
+func _gui_input(event: InputEvent) -> void:
+\t# Only a pointer event delivered to this label can click it. The D-pad's
+\t# emulated mouse press must not click whichever label gained focus.
+\tif accept_mouse_clicks and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 \t\tpressed.emit()
-\t\treturn
+\t\taccept_event()
 
+func _process(_delta: float) -> void:
 \t# Do not let the same input frame that moved focus onto this label activate
 \t# it. Require focus to survive at least one process frame with ui_accept
 \t# released, then accept the next deliberate press.
@@ -152,9 +179,24 @@ func toggle_process(enabled := false) -> void:
     print("Applied Android SelectableLabel fresh-accept focus guard")
 
 
+def patch_level_resolution() -> None:
+    """The Android Wrapper controls game width; levels must not scale the root."""
+    path = ROOT / "Scripts" / "Classes" / "LevelClass.gd"
+    text = path.read_text(encoding="utf-8")
+    for name in ("apply_resolution_enforcement", "reset_resolution"):
+        marker = f"func {name}() -> void:\n"
+        if text.count(marker) != 1:
+            raise RuntimeError(f"Could not locate LevelClass.{name}()")
+        text = text.replace(marker, marker + '\tif OS.has_feature("android"):\n\t\treturn\n', 1)
+    path.write_text(text, encoding="utf-8")
+    print("Kept level resolution changes inside the Android game viewport")
+
+
 def main() -> None:
     patch_touch_script()
+    patch_touch_scene_layout()
     patch_selectable_label()
+    patch_level_resolution()
 
 
 if __name__ == "__main__":
