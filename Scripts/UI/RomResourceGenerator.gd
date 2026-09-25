@@ -33,11 +33,26 @@ func done() -> void:
 		_enter_android_title_screen()
 		return
 
-	await get_tree().create_timer(0.5).timeout
+	await get_tree().create_timer(0.5, false).timeout
 	Global.transition_to_scene("res://Scenes/Levels/TitleScreen.tscn")
 
 func _enter_android_title_screen() -> void:
 	const TITLE_PATH := "res://Scenes/Levels/TitleScreen.tscn"
+
+	# RomResourceGenerator itself is normally entered by Global.transition_to_scene().
+	# Its _ready() therefore runs before that outer transition has finished and before
+	# Global.transitioning_scene is reset. Starting another transition immediately is
+	# rejected by Global.transition_to_scene(), leaving this scene alive forever on
+	# "STARTING TITLE..." even though rendering and touch input continue normally.
+	# Wait for the outer scene swap to finish before requesting the title.
+	while Global.transitioning_scene:
+		print("[ANDROID_TITLE] Waiting for previous scene transition to finish")
+		$MarginContainer/ProgressBar/Label.text = "STARTING TITLE..."
+		await Global.transition_finished
+
+	if not is_inside_tree() or is_queued_for_deletion():
+		return
+
 	print("[ANDROID_TITLE] Loading intact TitleScreen scene")
 	var packed := ResourceLoader.load(TITLE_PATH) as PackedScene
 	if packed == null:
