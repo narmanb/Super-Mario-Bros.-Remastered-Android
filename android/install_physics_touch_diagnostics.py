@@ -1,82 +1,50 @@
 #!/usr/bin/env python3
-"""Add compact physics diagnostics to the generated Android touch scene without modifying touch-control logic or positions."""
+"""Install the temporary Android physics diagnostics as an autoload.
+
+The diagnostics are deliberately independent of OnScreenControls.tscn.  The
+Android touch scene is generated during export and may be hidden/reparented by
+the wrapper, so attaching diagnostics to it is not a reliable way to display a
+runtime test readout.
+"""
 
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
-# Deliberately leave OnScreenControls.gd untouched; only add independent scene children.
+PROJECT = ROOT / "project.godot"
+AUTOLOAD_NAME = "AndroidPhysicsDiagnostics"
+SCRIPT_PATH = "res://Scripts/Parts/AndroidPhysicsDiagnosticsLabel.gd"
+AUTOLOAD_LINE = f'{AUTOLOAD_NAME}="*{SCRIPT_PATH}"'
 
 
 def main() -> None:
-    path = ROOT / "Scenes" / "Prefabs" / "UI" / "OnScreenControls.tscn"
-    scene = path.read_text(encoding="utf-8")
+    text = PROJECT.read_text(encoding="utf-8")
 
-    if "PhysicsDiagnosticsText" in scene:
-        raise RuntimeError("Physics diagnostics already installed")
+    match = re.search(r"(?ms)^\[autoload\]\n(.*?)(?=^\[|\Z)", text)
+    if match is None:
+        raise RuntimeError("Could not locate [autoload] section in project.godot")
 
-    header = '[gd_scene load_steps=21 format=3 uid="uid://fjrcs2mshn2x"]'
-    if header not in scene:
-        raise RuntimeError("Could not locate OnScreenControls scene header")
-    scene = scene.replace(
-        header,
-        '[gd_scene load_steps=22 format=3 uid="uid://fjrcs2mshn2x"]',
-        1,
-    )
+    section = match.group(0)
+    if re.search(rf"(?m)^{re.escape(AUTOLOAD_NAME)}=", section):
+        print("Android physics diagnostics autoload already installed")
+        return
 
-    first_gap = scene.find("\n\n")
-    if first_gap == -1:
-        raise RuntimeError("Could not locate OnScreenControls resource section")
-    ext = '\n[ext_resource type="Script" path="res://Scripts/Parts/AndroidPhysicsDiagnosticsLabel.gd" id="99_diag"]'
-    scene = scene[:first_gap] + ext + scene[first_gap:]
+    # Append to the existing autoload section so Settings/Global are created
+    # first.  project.godot is modified only in the CI checkout used to build
+    # the Android APK; the source project keeps no permanent debug autoload.
+    insertion = match.end()
+    before = text[:insertion].rstrip("\n")
+    after = text[insertion:].lstrip("\n")
+    text = before + "\n" + AUTOLOAD_LINE + "\n\n" + after
 
-    marker = "\n[connection signal=\"pressed\" from=\"Control/TouchScreenButton\""
-    if marker not in scene:
-        raise RuntimeError("Could not locate OnScreenControls connection section")
+    PROJECT.write_text(text, encoding="utf-8")
 
-    # Keep the readout in the otherwise-unused upper-right margin. It starts
-    # hidden and the label script only reveals both nodes while a live Player.gd
-    # instance exists, so menus/settings stay completely unobstructed.
-    nodes = r'''
+    # Fail the build immediately if the expected autoload was not written.
+    verify = PROJECT.read_text(encoding="utf-8")
+    if AUTOLOAD_LINE not in verify:
+        raise RuntimeError("Physics diagnostics autoload verification failed")
 
-[node name="PhysicsDiagnosticsBackground" type="ColorRect" parent="."]
-visible = false
-layout_mode = 3
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -100.0
-offset_top = 6.0
-offset_right = -4.0
-offset_bottom = 84.0
-grow_horizontal = 0
-mouse_filter = 2
-color = Color(0, 0, 0, 0.30)
-z_index = 5000
-
-[node name="PhysicsDiagnosticsText" type="Label" parent="."]
-visible = false
-layout_mode = 3
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -97.0
-offset_top = 8.0
-offset_right = -5.0
-offset_bottom = 82.0
-grow_horizontal = 0
-mouse_filter = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-theme_override_constants/outline_size = 1
-theme_override_font_sizes/font_size = 4
-text = ""
-horizontal_alignment = 0
-vertical_alignment = 0
-script = ExtResource("99_diag")
-z_index = 5001
-'''
-
-    scene = scene.replace(marker, nodes + marker, 1)
-    path.write_text(scene, encoding="utf-8")
-    print("Added compact right-side physics diagnostics without changing touch controls")
+    print(f"Installed Android physics diagnostics autoload: {AUTOLOAD_LINE}")
 
 
 if __name__ == "__main__":
