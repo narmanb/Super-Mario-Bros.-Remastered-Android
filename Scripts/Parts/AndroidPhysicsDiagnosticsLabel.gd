@@ -58,7 +58,7 @@ func _position_overlay() -> void:
 	var width := minf(PANEL_WIDTH, maxf(80.0, visible_size.x - PANEL_MARGIN * 2.0))
 	var height := minf(PANEL_HEIGHT, maxf(40.0, visible_size.y - PANEL_MARGIN * 2.0))
 	var panel_pos := Vector2(
-		maxf(PANEL_MARGIN, visible_size.x - width - PANEL_MARGIN),
+		maxf(PANEL_MARGIN, (visible_size.x - width) * 0.5),
 		PANEL_MARGIN
 	)
 
