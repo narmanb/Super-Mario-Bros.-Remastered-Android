@@ -1,10 +1,14 @@
 extends Node
 
 const PANEL_WIDTH := 116.0
-const PANEL_HEIGHT := 64.0
+const PANEL_HEIGHT := 40.0
 const PANEL_MARGIN := 4.0
 
 var max_abs_x_speed := 0.0
+var max_jump_up_speed := 0.0
+var max_fall_speed := 0.0
+var jump_count := 0
+var was_on_floor := true
 var last_level_id := 0
 var cached_player = null
 var search_cooldown := 0.0
@@ -139,6 +143,10 @@ func _update_text() -> void:
 	if not is_instance_valid(player):
 		cached_player = null
 		max_abs_x_speed = 0.0
+		max_jump_up_speed = 0.0
+		max_fall_speed = 0.0
+		jump_count = 0
+		was_on_floor = true
 		last_level_id = 0
 		_set_diagnostics_visible(false)
 		return
@@ -156,6 +164,10 @@ func _update_text() -> void:
 	if level_id != last_level_id:
 		last_level_id = level_id
 		max_abs_x_speed = 0.0
+		max_jump_up_speed = 0.0
+		max_fall_speed = 0.0
+		jump_count = 0
+		was_on_floor = true
 
 	# Keep runtime access dynamic here. The concrete Player script owns
 	# physics_dict/physics_params, while CharacterBody2D owns velocity.
@@ -165,30 +177,22 @@ func _update_text() -> void:
 		current_abs_x = absf(velocity_value.x)
 	max_abs_x_speed = maxf(max_abs_x_speed, current_abs_x)
 
-	var setting_value := int(Settings.file.gameplay.physics_style)
-	var setting_name := "REMASTERED" if setting_value != 0 else "CLASSIC"
-	var active_name := "UNKNOWN"
-	var physics_dict = player.physics_dict
-	if physics_dict == player.PHYSICS_PARAMETERS:
-		active_name = "REMASTERED"
-	elif physics_dict == player.CLASSIC_PARAMETERS:
-		active_name = "CLASSIC"
-
-	var run_speed := _physics_value(player, "RUN_SPEED")
-	var run_accel := _physics_value(player, "GROUND_RUN_ACCEL")
-	var walk_speed := _physics_value(player, "WALK_SPEED")
-	var walk_accel := _physics_value(player, "GROUND_WALK_ACCEL")
-	var jump_speed := _physics_value(player, "JUMP_SPEED_IDLE")
-	var jump_gravity := _physics_value(player, "JUMP_GRAVITY_IDLE")
+	var current_y := 0.0
+	if velocity_value is Vector2:
+		current_y = velocity_value.y
+		if current_y < 0.0:
+			max_jump_up_speed = maxf(max_jump_up_speed, -current_y)
+		else:
+			max_fall_speed = maxf(max_fall_speed, current_y)
+	var on_floor := player.is_on_floor()
+	if was_on_floor and not on_floor and current_y < 0.0:
+		jump_count += 1
+	was_on_floor = on_floor
 
 	readout.text = (
-		"PHYSICS\n"
-		+ "SET %s\n" % setting_name
-		+ "ACTIVE %s\n" % active_name
-		+ "RUN %.2f A %.2f\n" % [run_speed, run_accel]
-		+ "WALK %.2f A %.2f\n" % [walk_speed, walk_accel]
-		+ "JUMP %.2f G %.2f\n" % [jump_speed, jump_gravity]
-		+ "X %.2f  MAX %.2f" % [current_abs_x, max_abs_x_speed]
+		"SPEED X %.1f  MAX %.1f\n" % [current_abs_x, max_abs_x_speed]
+		+ "Y %.1f  JUMP MAX %.1f\n" % [current_y, max_jump_up_speed]
+		+ "FALL MAX %.1f  JUMPS %d" % [max_fall_speed, jump_count]
 	)
 
 
