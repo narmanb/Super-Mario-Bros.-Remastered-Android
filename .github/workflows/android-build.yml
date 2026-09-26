@@ -113,8 +113,10 @@ jobs:
           # Godot can exit successfully and produce an APK even if a script
           # failed to parse. Reject an APK with a nonfunctional pack menu.
           if grep -Fq 'GDScript::reload (res://Scripts/Parts/ResourcePackLoader.gd:' "$LOG_ABS" || \
-             grep -Fq 'Failed to load script "res://Scripts/Parts/ResourcePackLoader.gd"' "$LOG_ABS"; then
-            echo "ResourcePackLoader.gd failed to parse; rejecting APK" >&2
+             grep -Fq 'Failed to load script "res://Scripts/Parts/ResourcePackLoader.gd"' "$LOG_ABS" || \
+             grep -Fq 'GDScript::reload (res://Scripts/UI/SelectableOptionButton.gd:' "$LOG_ABS" || \
+             grep -Fq 'Failed to load script "res://Scripts/UI/SelectableOptionButton.gd"' "$LOG_ABS"; then
+            echo "Resource pack menu script failed to parse; rejecting APK" >&2
             exit 1
           fi
           test -s "$APK_ABS"

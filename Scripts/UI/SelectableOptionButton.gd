@@ -21,6 +21,15 @@ func handle_inputs() -> void:
 		if press_sfx != "":
 			play_sfx()
 
+func _gui_input(event: InputEvent) -> void:
+	# Android touch events emulate a left mouse click. Let the settings rows
+	# activate directly when tapped, even while the category header is selected.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		button_pressed.emit()
+		if press_sfx != "":
+			play_sfx()
+		accept_event()
+
 func play_sfx(sfx := press_sfx) -> void:
 	await get_tree().process_frame
 	AudioManager.play_global_sfx(sfx)
