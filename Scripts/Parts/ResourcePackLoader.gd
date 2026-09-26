@@ -1,12 +1,15 @@
 extends Node
 const RESOURCE_PACK_CONTAINER = preload("res://Scenes/Prefabs/UI/ResourcePackContainer.tscn")
+const SELECTABLE_OPTION_BUTTON = preload("res://Scenes/Parts/SelectableOptionButton.tscn")
 
 const TEMP_IMPORT := "user://resource_pack_import_pending.zip"
 const INSTALL_TITLE := "INSTALL ZIP"
+const INSTALL_FOLDER_TITLE := "INSTALL FOLDER"
 
 var resource_packs := []
 var containers := []
 var picker_open := false
+var folder_install_option: Control = null
 
 
 func _ready() -> void:
@@ -14,7 +17,23 @@ func _ready() -> void:
 		var install_option = get_node_or_null("../VBoxContainer/SelectableOptionNode")
 		if install_option != null and install_option.has_method("set_title"):
 			install_option.set_title(INSTALL_TITLE)
+		_add_android_folder_install_option()
 	get_resource_packs()
+
+func _add_android_folder_install_option() -> void:
+	if folder_install_option != null:
+		return
+	var option_parent := get_node_or_null("../VBoxContainer")
+	if option_parent == null:
+		return
+	folder_install_option = SELECTABLE_OPTION_BUTTON.instantiate()
+	folder_install_option.name = "InstallFolderOption"
+	folder_install_option.set_title(INSTALL_FOLDER_TITLE)
+	folder_install_option.button_pressed.connect(_choose_resource_pack_folder)
+	option_parent.add_child(folder_install_option)
+	option_parent.move_child(folder_install_option, 1)
+	folder_install_option.add_to_group("Options")
+	get_parent().options.insert(1, folder_install_option)
 
 func open_folder() -> void:
 	if OS.get_name() == "Android":
@@ -45,11 +64,37 @@ func _choose_resource_pack_zip() -> void:
 	picker_open = false
 	_open_fallback_file_dialog()
 
+func _choose_resource_pack_folder() -> void:
+	if picker_open:
+		return
+	if not DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		_show_import_error("This Android build does not provide the native folder picker.")
+		return
+	picker_open = true
+	var result := DisplayServer.file_dialog_show(
+		"Choose Extracted SMB1R Resource Pack Folder",
+		"",
+		"",
+		false,
+		DisplayServer.FILE_DIALOG_MODE_OPEN_DIR,
+		PackedStringArray(),
+		_on_native_folder_dialog
+	)
+	if result != OK:
+		picker_open = false
+		_show_import_error("Could not open the Android folder picker: %s" % error_string(result))
+
 func _on_native_file_dialog(status: bool, selected_paths: PackedStringArray, _selected_filter_index: int) -> void:
 	picker_open = false
 	if not status or selected_paths.is_empty():
 		return
 	_install_resource_pack_zip(selected_paths[0])
+
+func _on_native_folder_dialog(status: bool, selected_paths: PackedStringArray, _selected_filter_index: int) -> void:
+	picker_open = false
+	if not status or selected_paths.is_empty():
+		return
+	_install_resource_pack_folder(selected_paths[0])
 
 func _open_fallback_file_dialog() -> void:
 	var dialog := FileDialog.new()
@@ -67,6 +112,167 @@ func _on_fallback_file_selected(path: String, dialog: FileDialog) -> void:
 
 func _on_fallback_file_cancelled(dialog: FileDialog) -> void:
 	dialog.queue_free()
+
+func _install_resource_pack_folder(tree_uri: String) -> void:
+	var pack_info_path := tree_uri + "#pack_info.json"
+	if not FileAccess.file_exists(pack_info_path):
+		_show_import_error("The selected folder does not contain pack_info.json at its root. Select the resource-pack folder itself.")
+		return
+
+	var pack_info_text := FileAccess.get_file_as_string(pack_info_path)
+	var parsed = JSON.parse_string(pack_info_text)
+	if not parsed is Dictionary or parsed.is_empty():
+		_show_import_error("The selected folder's pack_info.json is not valid JSON.")
+		return
+
+	var folder_name := _sanitise_folder_name(str(parsed.get("name", "Resource Pack")))
+	if folder_name.is_empty() or folder_name == Global.ROM_PACK_NAME:
+		_show_import_error("The resource pack has an invalid folder name.")
+		return
+
+	var destination: String = Global.config_path.path_join("resource_packs").path_join(folder_name)
+	if DirAccess.dir_exists_absolute(destination):
+		_show_import_error("A resource pack named '%s' is already installed." % folder_name)
+		return
+
+	var make_error := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(destination))
+	if make_error != OK:
+		_show_import_error("Could not create the resource pack folder: %s" % error_string(make_error))
+		return
+
+	var copy_error := _copy_android_saf_tree(tree_uri, destination)
+	if not copy_error.is_empty():
+		_remove_dir_recursive(destination)
+		_show_import_error(copy_error)
+		return
+
+	if not FileAccess.file_exists(destination.path_join("pack_info.json")):
+		_remove_dir_recursive(destination)
+		_show_import_error("Folder import finished without a pack_info.json file.")
+		return
+
+	get_resource_packs()
+	OS.alert("Installed '%s' from its extracted folder. It is now available in the Resource Packs list." % folder_name, "Resource Pack Installed")
+
+func _copy_android_saf_tree(tree_uri: String, destination: String) -> String:
+	if OS.get_name() != "Android":
+		return "Folder import through Android Storage Access Framework is only available on Android."
+
+	var android_runtime = Engine.get_singleton("AndroidRuntime")
+	if android_runtime == null:
+		return "AndroidRuntime is unavailable, so the selected folder could not be copied."
+
+	var Uri = JavaClassWrapper.wrap("android.net.Uri")
+	var DocumentsContract = JavaClassWrapper.wrap("android.provider.DocumentsContract")
+	var Document = JavaClassWrapper.wrap("android.provider.DocumentsContract$Document")
+	var tree_uri_object = Uri.parse(tree_uri)
+	if tree_uri_object == null:
+		return "Android could not parse the selected folder URI."
+
+	var resolver = android_runtime.getApplicationContext().getContentResolver()
+	if resolver == null:
+		return "Android's content resolver is unavailable."
+
+	var root_document_id = DocumentsContract.getTreeDocumentId(tree_uri_object)
+	var java_error := _take_java_exception()
+	if not java_error.is_empty():
+		return "Could not inspect the selected Android folder: %s" % java_error
+	if root_document_id == null or str(root_document_id).is_empty():
+		return "Android did not return a document ID for the selected folder."
+
+	return _copy_android_document_children(tree_uri_object, str(root_document_id), destination, resolver, DocumentsContract, Document)
+
+func _copy_android_document_children(tree_uri_object, parent_document_id: String, destination: String, resolver, DocumentsContract, Document) -> String:
+	var children_uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree_uri_object, parent_document_id)
+	var java_error := _take_java_exception()
+	if not java_error.is_empty():
+		return "Could not enumerate the selected folder: %s" % java_error
+	if children_uri == null:
+		return "Android did not return the selected folder's contents."
+
+	var projection := PackedStringArray([
+		str(Document.COLUMN_DOCUMENT_ID),
+		str(Document.COLUMN_DISPLAY_NAME),
+		str(Document.COLUMN_MIME_TYPE)
+	])
+	var cursor = resolver.query(children_uri, projection, null, null, null)
+	java_error = _take_java_exception()
+	if not java_error.is_empty():
+		return "Could not read the selected folder: %s" % java_error
+	if cursor == null:
+		return "Android could not read the selected folder."
+
+	var id_index := cursor.getColumnIndex(str(Document.COLUMN_DOCUMENT_ID))
+	var name_index := cursor.getColumnIndex(str(Document.COLUMN_DISPLAY_NAME))
+	var mime_index := cursor.getColumnIndex(str(Document.COLUMN_MIME_TYPE))
+	java_error = _take_java_exception()
+	if not java_error.is_empty() or id_index < 0 or name_index < 0 or mime_index < 0:
+		cursor.close()
+		_take_java_exception()
+		return "Android returned an unexpected folder listing format."
+
+	while cursor.moveToNext():
+		var document_id := str(cursor.getString(id_index))
+		var display_name := str(cursor.getString(name_index))
+		var mime_type := str(cursor.getString(mime_index))
+		java_error = _take_java_exception()
+		if not java_error.is_empty():
+			cursor.close()
+			_take_java_exception()
+			return "Could not read an item in the selected folder: %s" % java_error
+
+		if not _is_safe_android_filename(display_name):
+			cursor.close()
+			_take_java_exception()
+			return "The selected folder contains an unsafe file or folder name and was not installed."
+		if display_name == ".DS_Store" or display_name == "__MACOSX":
+			continue
+
+		var output_path := destination.path_join(display_name)
+		if mime_type == str(Document.MIME_TYPE_DIR):
+			var dir_error := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output_path))
+			if dir_error != OK:
+				cursor.close()
+				_take_java_exception()
+				return "Could not create '%s' while importing the resource pack." % display_name
+			var child_error := _copy_android_document_children(tree_uri_object, document_id, output_path, resolver, DocumentsContract, Document)
+			if not child_error.is_empty():
+				cursor.close()
+				_take_java_exception()
+				return child_error
+		else:
+			var document_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri_object, document_id)
+			java_error = _take_java_exception()
+			if not java_error.is_empty() or document_uri == null:
+				cursor.close()
+				_take_java_exception()
+				return "Could not open '%s' from the selected folder." % display_name
+			var parent_error := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output_path.get_base_dir()))
+			if parent_error != OK:
+				cursor.close()
+				_take_java_exception()
+				return "Could not create a destination folder while importing '%s'." % display_name
+			if not _copy_file(str(document_uri.toString()), output_path):
+				cursor.close()
+				_take_java_exception()
+				return "Could not copy '%s' from the selected folder." % display_name
+
+	cursor.close()
+	java_error = _take_java_exception()
+	if not java_error.is_empty():
+		return "Android reported an error after reading the selected folder: %s" % java_error
+	return ""
+
+func _take_java_exception() -> String:
+	var exception = JavaClassWrapper.get_exception()
+	if exception == null:
+		return ""
+	return str(exception.toString())
+
+func _is_safe_android_filename(value: String) -> bool:
+	if value.is_empty() or value == "." or value == "..":
+		return false
+	return not value.contains("/") and not value.contains("\\") and not value.contains("\u0000")
 
 func _install_resource_pack_zip(source_path: String) -> void:
 	_delete_temp_import()
