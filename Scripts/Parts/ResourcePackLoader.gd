@@ -4,40 +4,36 @@ const SELECTABLE_OPTION_BUTTON = preload("res://Scenes/Parts/SelectableOptionBut
 
 const TEMP_IMPORT := "user://resource_pack_import_pending.zip"
 const INSTALL_TITLE := "INSTALL ZIP"
-const INSTALL_FOLDER_TITLE := "INSTALL FOLDER"
 
 var resource_packs := []
 var containers := []
 var picker_open := false
-var folder_install_option: Control = null
+var zip_install_option: Control = null
 
 
 func _ready() -> void:
 	if OS.get_name() == "Android":
-		var install_option = get_node_or_null("../VBoxContainer/SelectableOptionNode")
-		if install_option != null and install_option.has_method("set_title"):
-			install_option.set_title(INSTALL_TITLE)
-		_add_android_folder_install_option()
+		_add_android_zip_install_option()
 	get_resource_packs()
 
-func _add_android_folder_install_option() -> void:
-	if folder_install_option != null:
+func _add_android_zip_install_option() -> void:
+	if zip_install_option != null:
 		return
 	var option_parent := get_node_or_null("../VBoxContainer")
 	if option_parent == null:
 		return
-	folder_install_option = SELECTABLE_OPTION_BUTTON.instantiate()
-	folder_install_option.name = "InstallFolderOption"
-	folder_install_option.set_title(INSTALL_FOLDER_TITLE)
-	folder_install_option.button_pressed.connect(_choose_resource_pack_folder)
-	option_parent.add_child(folder_install_option)
-	option_parent.move_child(folder_install_option, 1)
-	folder_install_option.add_to_group("Options")
-	get_parent().options.insert(1, folder_install_option)
+	zip_install_option = SELECTABLE_OPTION_BUTTON.instantiate()
+	zip_install_option.name = "InstallZipOption"
+	zip_install_option.set_title(INSTALL_TITLE)
+	zip_install_option.button_pressed.connect(_choose_resource_pack_zip)
+	option_parent.add_child(zip_install_option)
+	option_parent.move_child(zip_install_option, 1)
+	zip_install_option.add_to_group("Options")
+	get_parent().options.insert(1, zip_install_option)
 
 func open_folder() -> void:
 	if OS.get_name() == "Android":
-		_choose_resource_pack_zip()
+		_choose_resource_pack_folder()
 		return
 	OS.shell_show_in_file_manager(ProjectSettings.globalize_path(Global.config_path.path_join("resource_packs")), true)
 
@@ -114,13 +110,17 @@ func _on_fallback_file_cancelled(dialog: FileDialog) -> void:
 	dialog.queue_free()
 
 func _install_resource_pack_folder(tree_uri: String) -> void:
-	var pack_info_path := tree_uri + "#pack_info.json"
-	if not FileAccess.file_exists(pack_info_path):
-		_show_import_error("The selected folder does not contain pack_info.json at its root. Select the resource-pack folder itself.")
+	if not tree_uri.begins_with("content://"):
+		_show_import_error("Android did not return a readable folder. Please choose the pack folder using the system picker.")
 		return
-
-	var pack_info_text := FileAccess.get_file_as_string(pack_info_path)
-	var parsed = JSON.parse_string(pack_info_text)
+	# The folder picker grants access to the entire tree. A JSON file picked on
+	# its own would not grant access to the pack's other files and subfolders.
+	var info_file := FileAccess.open(tree_uri + "#pack_info.json", FileAccess.READ)
+	if info_file == null:
+		_show_import_error("Could not read pack_info.json from that folder. Select the extracted pack folder itself (the one containing pack_info.json).")
+		return
+	var parsed = JSON.parse_string(info_file.get_as_text())
+	info_file.close()
 	if not parsed is Dictionary or parsed.is_empty():
 		_show_import_error("The selected folder's pack_info.json is not valid JSON.")
 		return
@@ -453,13 +453,23 @@ func _copy_file(source_path: String, destination_path: String) -> bool:
 		return false
 
 	const CHUNK_SIZE := 1024 * 1024
+	var copy_ok := true
 	while source.get_position() < source.get_length():
 		var remaining := source.get_length() - source.get_position()
-		destination.store_buffer(source.get_buffer(min(CHUNK_SIZE, remaining)))
+		var data := source.get_buffer(min(CHUNK_SIZE, remaining))
+		if data.is_empty():
+			copy_ok = false
+			break
+		destination.store_buffer(data)
+		if destination.get_error() != OK:
+			copy_ok = false
+			break
 
 	source.close()
 	destination.close()
-	return true
+	if not copy_ok:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(destination_path))
+	return copy_ok
 
 func _delete_temp_import() -> void:
 	if FileAccess.file_exists(TEMP_IMPORT):
