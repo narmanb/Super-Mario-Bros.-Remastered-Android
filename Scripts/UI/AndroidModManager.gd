@@ -181,11 +181,11 @@ func _add_loaded_mod_row(mod_id: String, mod_data: ModData) -> void:
 		if not mod_data.manifest.name.is_empty():
 			display_name = mod_data.manifest.name
 		version = mod_data.manifest.version_number
-		checkbox.tooltip_text = mod_data.manifest.description
+		checkbox.tooltip_text = str(mod_data.manifest.description).to_upper()
 
-	checkbox.text = display_name
+	checkbox.text = display_name.to_upper()
 	if not version.is_empty():
-		checkbox.text += "  v" + version
+		checkbox.text += "  V" + version.to_upper()
 	if not mod_data.is_loadable:
 		checkbox.text += "  [ERROR]"
 
@@ -214,9 +214,9 @@ func _add_pending_zip_rows(known_zip_names: Dictionary) -> int:
 		pending.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		pending.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		if info.get("ok", false):
-			pending.text = "%s  v%s  [RESTART TO LOAD]" % [info.get("name", file_name), info.get("version", "")]
+			pending.text = "%s  V%s  [RESTART TO LOAD]" % [str(info.get("name", file_name)).to_upper(), str(info.get("version", "")).to_upper()]
 		else:
-			pending.text = "%s  [INVALID MOD ZIP]" % file_name
+			pending.text = "%s  [INVALID MOD ZIP]" % file_name.to_upper()
 		mod_list_box.add_child(pending)
 	return count
 
@@ -394,4 +394,4 @@ func _delete_temp_import() -> void:
 
 func _set_status(message: String) -> void:
 	if status_label != null:
-		status_label.text = message
+		status_label.text = message.to_upper()
