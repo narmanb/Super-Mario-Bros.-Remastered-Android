@@ -1,6 +1,6 @@
 class_name ResourcePackContainer
 extends HBoxContainer
-const RESOURCE_PACK_CONFIG_MENU = preload("uid://bom2rstlk8fws")
+const RESOURCE_PACK_CONFIG_MENU = preload("res://Scenes/Prefabs/UI/ResourcePackConfigMenu.tscn")
 var pack_json := {"name": "Hello",
 				"description": "Hi :"}
 var icon: Texture = null
