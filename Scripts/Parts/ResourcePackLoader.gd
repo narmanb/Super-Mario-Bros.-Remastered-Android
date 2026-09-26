@@ -1,5 +1,5 @@
 extends Node
-const RESOURCE_PACK_CONTAINER = preload("uid://lggi3b4310yl")
+const RESOURCE_PACK_CONTAINER = preload("res://Scenes/Prefabs/UI/ResourcePackContainer.tscn")
 
 const TEMP_IMPORT := "user://resource_pack_import_pending.zip"
 const INSTALL_TITLE := "INSTALL ZIP"
