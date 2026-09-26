@@ -202,9 +202,9 @@ func _copy_android_document_children(tree_uri_object, parent_document_id: String
 	if cursor == null:
 		return "Android could not read the selected folder."
 
-	var id_index := cursor.getColumnIndex(str(Document.COLUMN_DOCUMENT_ID))
-	var name_index := cursor.getColumnIndex(str(Document.COLUMN_DISPLAY_NAME))
-	var mime_index := cursor.getColumnIndex(str(Document.COLUMN_MIME_TYPE))
+	var id_index: int = cursor.getColumnIndex(str(Document.COLUMN_DOCUMENT_ID))
+	var name_index: int = cursor.getColumnIndex(str(Document.COLUMN_DISPLAY_NAME))
+	var mime_index: int = cursor.getColumnIndex(str(Document.COLUMN_MIME_TYPE))
 	java_error = _take_java_exception()
 	if not java_error.is_empty() or id_index < 0 or name_index < 0 or mime_index < 0:
 		cursor.close()
@@ -272,7 +272,7 @@ func _take_java_exception() -> String:
 func _is_safe_android_filename(value: String) -> bool:
 	if value.is_empty() or value == "." or value == "..":
 		return false
-	return not value.contains("/") and not value.contains("\\") and not value.contains("\u0000")
+	return not value.contains("/") and not value.contains("\\") and not value.to_utf8_buffer().has(0)
 
 func _install_resource_pack_zip(source_path: String) -> void:
 	_delete_temp_import()
