@@ -163,104 +163,72 @@ func _copy_android_saf_tree(tree_uri: String, destination: String) -> String:
 		return "AndroidRuntime is unavailable, so the selected folder could not be copied."
 
 	var Uri = JavaClassWrapper.wrap("android.net.Uri")
-	var DocumentsContract = JavaClassWrapper.wrap("android.provider.DocumentsContract")
-	var Document = JavaClassWrapper.wrap("android.provider.DocumentsContract$Document")
+	var DocumentFile = JavaClassWrapper.wrap("androidx.documentfile.provider.DocumentFile")
 	var tree_uri_object = Uri.parse(tree_uri)
 	if tree_uri_object == null:
 		return "Android could not parse the selected folder URI."
 
-	var resolver = android_runtime.getApplicationContext().getContentResolver()
-	if resolver == null:
-		return "Android's content resolver is unavailable."
-
-	var root_document_id = DocumentsContract.getTreeDocumentId(tree_uri_object)
+	var root_folder = DocumentFile.fromTreeUri(android_runtime.getApplicationContext(), tree_uri_object)
 	var java_error := _take_java_exception()
 	if not java_error.is_empty():
-		return "Could not inspect the selected Android folder: %s" % java_error
-	if root_document_id == null or str(root_document_id).is_empty():
-		return "Android did not return a document ID for the selected folder."
+		return "Could not open the selected Android folder: %s" % java_error
+	if root_folder == null:
+		return "Android could not open the selected folder."
 
-	return _copy_android_document_children(tree_uri_object, str(root_document_id), destination, resolver, DocumentsContract, Document)
+	return _copy_android_document_children(root_folder, tree_uri, "", destination, true)
 
-func _copy_android_document_children(tree_uri_object, parent_document_id: String, destination: String, resolver, DocumentsContract, Document) -> String:
-	var children_uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree_uri_object, parent_document_id)
+func _copy_android_document_children(folder, tree_uri: String, relative_dir: String, destination: String, is_root: bool) -> String:
+	var children = folder.listFiles()
 	var java_error := _take_java_exception()
 	if not java_error.is_empty():
-		return "Could not enumerate the selected folder: %s" % java_error
-	if children_uri == null:
-		return "Android did not return the selected folder's contents."
+		return "Could not list files in the selected folder: %s" % java_error
+	if not children is Array:
+		return "Android did not return a readable folder listing."
 
-	var projection := PackedStringArray([
-		str(Document.COLUMN_DOCUMENT_ID),
-		str(Document.COLUMN_DISPLAY_NAME),
-		str(Document.COLUMN_MIME_TYPE)
-	])
-	var cursor = resolver.query(children_uri, projection, null, null, null)
-	java_error = _take_java_exception()
-	if not java_error.is_empty():
-		return "Could not read the selected folder: %s" % java_error
-	if cursor == null:
-		return "Android could not read the selected folder."
+	# The JSON read before copying proved the chosen folder contains this file.
+	# Refuse a silently empty or incomplete SAF listing instead of reporting
+	# success after copying nothing.
+	if is_root:
+		var found_info := false
+		for child in children:
+			var child_name = child.getName()
+			java_error = _take_java_exception()
+			if not java_error.is_empty():
+				return "Could not inspect the selected folder: %s" % java_error
+			if child_name != null and str(child_name) == "pack_info.json":
+				found_info = true
+		if not found_info:
+			return "Android listed the folder without pack_info.json, although it was readable. The import was stopped before copying."
 
-	var id_index: int = cursor.getColumnIndex(str(Document.COLUMN_DOCUMENT_ID))
-	var name_index: int = cursor.getColumnIndex(str(Document.COLUMN_DISPLAY_NAME))
-	var mime_index: int = cursor.getColumnIndex(str(Document.COLUMN_MIME_TYPE))
-	java_error = _take_java_exception()
-	if not java_error.is_empty() or id_index < 0 or name_index < 0 or mime_index < 0:
-		cursor.close()
-		_take_java_exception()
-		return "Android returned an unexpected folder listing format."
-
-	while cursor.moveToNext():
-		var document_id := str(cursor.getString(id_index))
-		var display_name := str(cursor.getString(name_index))
-		var mime_type := str(cursor.getString(mime_index))
+	for child in children:
+		var name_value = child.getName()
 		java_error = _take_java_exception()
-		if not java_error.is_empty():
-			cursor.close()
-			_take_java_exception()
-			return "Could not read an item in the selected folder: %s" % java_error
+		if not java_error.is_empty() or name_value == null:
+			return "Could not read a file name in the selected folder."
+		var display_name := str(name_value)
 
 		if not _is_safe_android_filename(display_name):
-			cursor.close()
-			_take_java_exception()
 			return "The selected folder contains an unsafe file or folder name and was not installed."
 		if display_name == ".DS_Store" or display_name == "__MACOSX":
 			continue
 
 		var output_path := destination.path_join(display_name)
-		if mime_type == str(Document.MIME_TYPE_DIR):
+		var relative_path := display_name if relative_dir.is_empty() else relative_dir.path_join(display_name)
+		var is_directory = child.isDirectory()
+		java_error = _take_java_exception()
+		if not java_error.is_empty():
+			return "Could not inspect '%s' in the selected folder: %s" % [display_name, java_error]
+		if is_directory:
 			var dir_error := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output_path))
 			if dir_error != OK:
-				cursor.close()
-				_take_java_exception()
 				return "Could not create '%s' while importing the resource pack." % display_name
-			var child_error := _copy_android_document_children(tree_uri_object, document_id, output_path, resolver, DocumentsContract, Document)
+			var child_error := _copy_android_document_children(child, tree_uri, relative_path, output_path, false)
 			if not child_error.is_empty():
-				cursor.close()
-				_take_java_exception()
 				return child_error
 		else:
-			var document_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri_object, document_id)
-			java_error = _take_java_exception()
-			if not java_error.is_empty() or document_uri == null:
-				cursor.close()
-				_take_java_exception()
-				return "Could not open '%s' from the selected folder." % display_name
-			var parent_error := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output_path.get_base_dir()))
-			if parent_error != OK:
-				cursor.close()
-				_take_java_exception()
-				return "Could not create a destination folder while importing '%s'." % display_name
-			if not _copy_file(str(document_uri.toString()), output_path):
-				cursor.close()
-				_take_java_exception()
+			if not _copy_file(tree_uri + "#" + relative_path, output_path):
 				return "Could not copy '%s' from the selected folder." % display_name
 
-	cursor.close()
-	java_error = _take_java_exception()
-	if not java_error.is_empty():
-		return "Android reported an error after reading the selected folder: %s" % java_error
 	return ""
 
 func _take_java_exception() -> String:
@@ -447,6 +415,7 @@ func _copy_file(source_path: String, destination_path: String) -> bool:
 	var source := FileAccess.open(source_path, FileAccess.READ)
 	if source == null:
 		return false
+	var expected_size := source.get_length()
 	var destination := FileAccess.open(destination_path, FileAccess.WRITE)
 	if destination == null:
 		source.close()
@@ -467,6 +436,11 @@ func _copy_file(source_path: String, destination_path: String) -> bool:
 
 	source.close()
 	destination.close()
+	if copy_ok:
+		var installed := FileAccess.open(destination_path, FileAccess.READ)
+		copy_ok = installed != null and installed.get_length() == expected_size
+		if installed != null:
+			installed.close()
 	if not copy_ok:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(destination_path))
 	return copy_ok
