@@ -2,7 +2,7 @@ extends Node
 const RESOURCE_PACK_CONTAINER = preload("uid://lggi3b4310yl")
 
 const TEMP_IMPORT := "user://resource_pack_import_pending.zip"
-const INSTALL_TITLE := "INSTALL RESOURCE PACK"
+const INSTALL_TITLE := "INSTALL ZIP"
 
 var resource_packs := []
 var containers := []
@@ -86,7 +86,7 @@ func _install_resource_pack_zip(source_path: String) -> void:
 		_show_import_error("The resource pack has an invalid folder name.")
 		return
 
-	var destination := Global.config_path.path_join("resource_packs").path_join(folder_name)
+	var destination: String = Global.config_path.path_join("resource_packs").path_join(folder_name)
 	if DirAccess.dir_exists_absolute(destination):
 		_delete_temp_import()
 		_show_import_error("A resource pack named '%s' is already installed." % folder_name)
