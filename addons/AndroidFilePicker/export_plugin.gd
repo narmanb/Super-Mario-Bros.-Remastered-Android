@@ -22,5 +22,10 @@ class AndroidExportPlugin extends EditorExportPlugin:
 			return PackedStringArray(["AndroidFilePicker/app-debug.aar"])
 		return PackedStringArray(["AndroidFilePicker/app-release.aar"])
 
+	func _get_android_dependencies(_platform, _debug: bool) -> PackedStringArray:
+		# Godot 4.6's Android SAF implementation uses DocumentFile when opening
+		# a picked folder's children. Gradle exports need it in the app module.
+		return PackedStringArray(["androidx.documentfile:documentfile:1.1.0"])
+
 	func _get_name() -> String:
 		return _plugin_name

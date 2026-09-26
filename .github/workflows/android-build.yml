@@ -120,6 +120,7 @@ jobs:
             exit 1
           fi
           test -s "$APK_ABS"
+          python3 android/check_android_apk.py "$APK_ABS"
           ls -lh "$APK_ABS"
 
       - name: Upload export diagnostics
